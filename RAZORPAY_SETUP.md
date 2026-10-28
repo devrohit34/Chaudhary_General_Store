@@ -42,6 +42,31 @@ npm run admin:provision
 
 Use a unique password with at least 14 characters. The script stores only a bcrypt hash.
 
+On Windows, this PowerShell snippet prompts for the password without echoing it and clears the temporary environment variables when it finishes:
+
+```powershell
+$adminPassword = Read-Host "Admin password (14-72 characters)" -AsSecureString
+$passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($adminPassword)
+try {
+  $env:ADMIN_EMAIL = Read-Host "Admin email"
+  $env:ADMIN_NAME = Read-Host "Admin name"
+  $env:ADMIN_INITIAL_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
+  npm run admin:provision
+  if ($LASTEXITCODE -ne 0) {
+    throw "Admin provisioning failed. Check the error above and confirm the database is configured."
+  }
+}
+finally {
+  Remove-Item Env:ADMIN_EMAIL -ErrorAction SilentlyContinue
+  Remove-Item Env:ADMIN_NAME -ErrorAction SilentlyContinue
+  Remove-Item Env:ADMIN_INITIAL_PASSWORD -ErrorAction SilentlyContinue
+  [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer)
+  $adminPassword.Dispose()
+}
+```
+
+Run this from the project root with the intended database configured in `.env.local`; the script loads that file and upserts only the administrator account. It does not run migrations or modify orders, products, or payments. Running it again for the same email resets that administrator's password. Do not use the default credentials mentioned in the dashboard ZIP; this project authenticates against its own Prisma-backed admin table.
+
 ## 3. Configure Razorpay
 
 Set these server-side environment variables in the local environment and the deployment platform:

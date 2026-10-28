@@ -85,7 +85,7 @@ export default function OrdersPage() {
                   </div>
                   <div className="flex gap-2 mb-3">
                     {order.order_items?.slice(0, 5).map((item, i) => (
-                      <div key={i} className="h-12 w-12 rounded-lg overflow-hidden bg-muted border">
+                      <div key={i} className="relative h-12 w-12 rounded-lg overflow-hidden bg-muted border">
                         {item.product_image && (
                           <Image src={item.product_image} alt={item.product_name} fill className="object-cover" />
                         )}

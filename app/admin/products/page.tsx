@@ -319,7 +319,7 @@ export default function AdminProductsPage() {
                   <tr key={p.id} className="hover:bg-gray-50">
                     <td className="p-4">
                       <div className="flex items-center gap-3">
-                        <div className="h-12 w-12 rounded-lg bg-gray-100 border flex items-center justify-center overflow-hidden flex-shrink-0">
+                        <div className="relative h-12 w-12 rounded-lg bg-gray-100 border flex items-center justify-center overflow-hidden flex-shrink-0">
                           {p.image_url ? (
                             <Image src={p.image_url} alt={p.name} fill className="object-cover" />
                           ) : (
