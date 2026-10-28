@@ -1,5 +1,6 @@
 import './load-env';
 import { getPrisma } from '../lib/prisma-client';
+import { formatSafeError } from './error-message';
 
 async function main() {
   const prisma = getPrisma();
@@ -16,6 +17,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  console.error('Neon database verification failed:', error instanceof Error ? error.message : 'Unknown error');
+  console.error('Neon database verification failed:', formatSafeError(error));
   process.exitCode = 1;
 });

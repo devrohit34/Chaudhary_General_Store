@@ -14,8 +14,13 @@ describe('money helpers', () => {
     });
     expect(calculateOrderAmounts(99_899, true)).toEqual({
       subtotalPaise: 99_899,
-      deliveryChargePaise: 8_900,
-      totalPaise: 108_799,
+      deliveryChargePaise: 2_100,
+      totalPaise: 101_999,
+    });
+    expect(calculateOrderAmounts(99_899, false)).toEqual({
+      subtotalPaise: 99_899,
+      deliveryChargePaise: 100,
+      totalPaise: 99_999,
     });
   });
 

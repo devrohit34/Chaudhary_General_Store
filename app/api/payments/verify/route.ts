@@ -3,6 +3,7 @@ import { createHmac } from 'crypto';
 import { z } from 'zod';
 import { getPrisma } from '@/lib/prisma';
 import { getRazorpayConfig, razorpayAuth, safeEqualHex } from '@/lib/razorpay-server';
+import { hasSameOrigin } from '@/lib/request-security';
 
 export const runtime = 'nodejs';
 
@@ -14,6 +15,10 @@ const verificationSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  if (!hasSameOrigin(request)) {
+    return NextResponse.json({ verified: false, error: 'Invalid request origin.' }, { status: 403 });
+  }
+
   const parsed = verificationSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ verified: false, error: 'Payment verification details are invalid.' }, { status: 400 });

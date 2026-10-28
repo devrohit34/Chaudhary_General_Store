@@ -2,6 +2,7 @@ import './load-env';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { getPrisma } from '../lib/prisma-client';
+import { formatSafeError } from './error-message';
 
 const credentialsSchema = z.object({
   email: z.string().trim().email().max(254),
@@ -35,6 +36,6 @@ async function main() {
 }
 
 main().catch((error: unknown) => {
-  console.error('Admin provisioning failed:', error instanceof Error ? error.message : 'Unknown error');
+  console.error('Admin provisioning failed:', formatSafeError(error));
   process.exitCode = 1;
 });

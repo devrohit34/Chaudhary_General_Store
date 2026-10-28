@@ -7,7 +7,7 @@ export function calculateOrderAmounts(subtotalPaise: number, isExpress: boolean)
   if (!Number.isSafeInteger(subtotalPaise) || subtotalPaise < 0) {
     throw new RangeError('Subtotal must be a non-negative integer number of paise.');
   }
-  const deliveryChargePaise = (subtotalPaise >= 99_900 ? 0 : 6_900) + (isExpress ? 2_000 : 0);
+  const deliveryChargePaise = (subtotalPaise >= 99_900 ? 0 : 100) + (isExpress ? 2_000 : 0);
   return {
     subtotalPaise,
     deliveryChargePaise,

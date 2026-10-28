@@ -63,6 +63,27 @@ Subscribe to:
 
 The handler verifies the signature over the raw request body and records event IDs to make processing idempotent. A failed payment attempt does not mark the order paid or prevent another attempt; only a captured payment matching the stored order amount and currency is confirmed.
 
+
+## Quick start (Windows / PowerShell)
+
+1. Keep your existing private `.env.local` file in the project root. It is intentionally not included in the shared ZIP so API secrets are not redistributed.
+2. Ensure it contains `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET`. Use **Test Mode** keys first. Add a separate `RAZORPAY_WEBHOOK_SECRET` after creating the webhook in the Razorpay Dashboard.
+3. Ensure `DATABASE_URL`, `DIRECT_URL`, `ADMIN_SESSION_SECRET`, `CUSTOMER_SESSION_SECRET`, and `ORDER_ACCESS_SECRET` are also configured. The checkout flow requires the database and order-access/session configuration, not only Razorpay keys.
+4. In a terminal opened in this folder, run:
+
+```powershell
+npm ci
+npm run prisma:generate
+npx prisma validate
+npm run dev
+```
+
+5. Open the local storefront, add an available product to the cart, and test checkout using Razorpay **Test Mode** credentials.
+6. In Razorpay Dashboard, configure the webhook URL `https://<your-deployed-domain>/api/payments/webhook` and subscribe to `payment.captured` and `payment.failed`. The webhook secret entered in the dashboard must exactly match `RAZORPAY_WEBHOOK_SECRET` in the deployment environment.
+7. Before going live, deploy the app with all required environment variables, run database migrations only after reviewing the migration and database target, then test a complete payment and verify the order is marked paid.
+
+**Important:** This ZIP contains source code and an environment-variable template, not your private `.env.local` file. Keep your existing local file separately and configure the same variables in your hosting provider. Do not paste secret values into source files or prefix server secrets with `NEXT_PUBLIC_`.
+
 ## 4. Product images and manual UPI screenshots
 
 Set `BLOB_READ_WRITE_TOKEN` to enable authenticated admin product-image uploads to public Vercel Blob storage. Product images are public storefront assets.

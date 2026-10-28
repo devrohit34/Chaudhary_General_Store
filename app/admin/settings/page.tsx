@@ -22,7 +22,7 @@ export default function SettingsPage() {
 
   const [deliverySettings, setDeliverySettings] = useState({
     freeDeliveryAbove: '999',
-    standardCharge: '69',
+    standardCharge: '1',
     expressCharge: '20',
     minOrderAmount: '100',
   });

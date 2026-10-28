@@ -10,7 +10,7 @@ import { Minus, Plus, Trash2, ShoppingCart, ChevronRight } from 'lucide-react';
 export default function CartPage() {
   const router = useRouter();
   const { items, updateQuantity, removeItem, subtotal, totalItems } = useCart();
-  const deliveryCharge = subtotal >= 999 ? 0 : 69;
+  const deliveryCharge = subtotal >= 999 ? 0 : 1;
   const total = subtotal + deliveryCharge;
 
   if (items.length === 0) {

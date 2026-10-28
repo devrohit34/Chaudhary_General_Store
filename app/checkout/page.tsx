@@ -91,7 +91,7 @@ export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [placing, setPlacing] = useState(false);
 
-  const deliveryCharge = subtotal >= 999 ? 0 : 69;
+  const deliveryCharge = subtotal >= 999 ? 0 : 1;
   const expressCharge = isExpress ? 20 : 0;
   const total = subtotal + deliveryCharge + expressCharge;
 
