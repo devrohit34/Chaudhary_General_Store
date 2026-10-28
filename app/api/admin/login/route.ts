@@ -1,44 +1,44 @@
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { SignJWT } from 'jose';
-
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.ADMIN_JWT_SECRET || 'fallback-secret-change-in-production'
-);
+import { z } from 'zod';
+import { getPrisma } from '@/lib/prisma';
+import { createAdminSession } from '@/lib/admin-session';
+import { hasSameOrigin } from '@/lib/request-security';
 
 export async function POST(request: Request) {
+  if (!hasSameOrigin(request)) return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });
   try {
-    const { email, password } = await request.json();
+    const body = z.object({
+      email: z.string().email().max(254),
+      password: z.string().min(1).max(72),
+    }).safeParse(await request.json());
+    if (!body.success) return NextResponse.json({ error: 'Enter a valid email and password.' }, { status: 400 });
 
-    const adminEmail = process.env.ADMIN_EMAIL || 'kundan@chaudharygeneralstore.com';
-    const adminHash = process.env.ADMIN_PASSWORD_HASH || '';
-
-    if (email.toLowerCase().trim() !== adminEmail.toLowerCase()) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    const admin = await getPrisma().admin.findUnique({
+      where: { email: body.data.email.trim().toLowerCase() },
+    });
+    if (!admin || !admin.isActive || !(await bcrypt.compare(body.data.password, admin.passwordHash))) {
+      return NextResponse.json({ error: 'Invalid credentials.' }, { status: 401 });
     }
 
-    const valid = await bcrypt.compare(password, adminHash);
-    if (!valid) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+    if (!process.env.ADMIN_SESSION_SECRET || process.env.ADMIN_SESSION_SECRET.length < 32) {
+      return NextResponse.json({ error: 'Admin authentication is not configured.' }, { status: 503 });
     }
-
-    const token = await new SignJWT({ email: adminEmail, role: 'admin' })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setIssuedAt()
-      .setExpirationTime('7d')
-      .sign(JWT_SECRET);
+    const token = await createAdminSession(admin.email, admin.role);
+    await getPrisma().admin.update({ where: { id: admin.id }, data: { lastLoginAt: new Date() } });
 
     const response = NextResponse.json({ success: true });
     response.cookies.set('admin-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60,
+      sameSite: 'strict',
+      maxAge: 12 * 60 * 60,
       path: '/',
     });
 
     return response;
-  } catch {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  } catch (error) {
+    console.error('Admin login failed:', error instanceof Error ? error.message : 'Unknown error');
+    return NextResponse.json({ error: 'Admin sign-in is temporarily unavailable.' }, { status: 503 });
   }
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,39 +38,42 @@ export default function CustomersPage() {
 
   async function fetchCustomers() {
     setLoading(true);
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .order('created_at', { ascending: false });
-    setCustomers(data || []);
-
-    if (data && data.length > 0) {
-      const { data: ordersData } = await supabase
-        .from('orders')
-        .select('user_id, total_amount, status');
-      if (ordersData) {
-        const stats: Record<string, { count: number; total: number }> = {};
-        ordersData.forEach((o) => {
-          if (!o.user_id) return;
-          if (!stats[o.user_id]) stats[o.user_id] = { count: 0, total: 0 };
-          stats[o.user_id].count++;
-          stats[o.user_id].total += Number(o.total_amount);
-        });
-        setOrderStats(stats);
+    try {
+      const response = await fetch('/api/admin/customers', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Customers could not be loaded.');
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('customers' in payload) || !Array.isArray(payload.customers)) {
+        throw new Error('Customer service returned invalid data.');
       }
+      const rows = payload.customers as (Customer & { count: number; total: number })[];
+      setCustomers(rows);
+      setOrderStats(Object.fromEntries(rows.map((customer) => [
+        customer.id,
+        { count: customer.count, total: customer.total },
+      ])));
+    } catch (error) {
+      console.error('Admin customer list failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Customers could not be loaded.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   const viewCustomer = async (c: Customer) => {
     setSelected(c);
-    const { data } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('user_id', c.id)
-      .order('created_at', { ascending: false })
-      .limit(10);
-    setOrders(data || []);
+    try {
+      const response = await fetch(`/api/admin/customers/${encodeURIComponent(c.id)}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('Customer order history could not be loaded.');
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('orders' in payload) || !Array.isArray(payload.orders)) {
+        throw new Error('Order service returned invalid data.');
+      }
+      setOrders(payload.orders as CustomerOrder[]);
+    } catch (error) {
+      console.error('Admin customer order history failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Customer order history could not be loaded.');
+      setOrders([]);
+    }
   };
 
   const filtered = customers.filter(

@@ -1,10 +1,8 @@
 'use client';
 
-import type { PostgrestError } from '@supabase/supabase-js';
 import Image from 'next/image';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useCart } from '@/lib/cart-context';
-import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,29 +28,46 @@ type CheckoutAddress = {
   pincode: string;
 };
 
-type CheckoutOrder = {
-  id?: string;
-  order_number: string;
-  status: string;
-  payment_method: string;
-  payment_status: string;
-  qr_created_at: string | null;
-  subtotal: number;
-  delivery_charge: number;
-  gst_amount: number;
-  total_amount: number;
-  address_snapshot: CheckoutAddress;
-  delivery_slot: string;
-  delivery_otp: string;
-  is_express: boolean;
-  created_at: string;
-  updated_at: string;
+type RazorpayOrderResponse = {
+  keyId: string;
+  razorpayOrderId: string;
+  orderNumber: string;
+  amount: number;
+  currency: string;
 };
 
-type SupabaseInsertResult<T> = {
-  data: T[] | T | null;
-  error: PostgrestError | null;
-};
+function isRazorpayOrderResponse(value: unknown): value is RazorpayOrderResponse {
+  return typeof value === 'object' && value !== null &&
+    'keyId' in value && typeof value.keyId === 'string' &&
+    'razorpayOrderId' in value && typeof value.razorpayOrderId === 'string' &&
+    'orderNumber' in value && typeof value.orderNumber === 'string' &&
+    'amount' in value && typeof value.amount === 'number' &&
+    'currency' in value && typeof value.currency === 'string';
+}
+
+function apiError(value: unknown) {
+  return typeof value === 'object' && value !== null && 'error' in value && typeof value.error === 'string'
+    ? value.error
+    : null;
+}
+
+function isRazorpaySuccess(value: unknown): value is {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+} {
+  return typeof value === 'object' && value !== null &&
+    'razorpay_order_id' in value && typeof value.razorpay_order_id === 'string' &&
+    'razorpay_payment_id' in value && typeof value.razorpay_payment_id === 'string' &&
+    'razorpay_signature' in value && typeof value.razorpay_signature === 'string';
+}
+
+function errorDescription(value: unknown) {
+  if (typeof value !== 'object' || value === null || !('error' in value) ||
+      typeof value.error !== 'object' || value.error === null ||
+      !('description' in value.error) || typeof value.error.description !== 'string') return null;
+  return value.error.description;
+}
 
 const deliverySlots = [
   'Express - 30 mins (₹20 extra)',
@@ -66,6 +81,7 @@ const deliverySlots = [
 export default function CheckoutPage() {
   const { items, subtotal, clearCart } = useCart();
   const router = useRouter();
+  const checkoutKey = useRef<string | null>(null);
   const [step, setStep] = useState(1);
   const [address, setAddress] = useState({
     full_name: '', phone: '', address_line1: '', address_line2: '', city: '', state: '', pincode: '',
@@ -84,6 +100,8 @@ export default function CheckoutPage() {
     if (items.length === 0) return;
     setPlacing(true);
     try {
+      const idempotencyKey = checkoutKey.current || window.crypto.randomUUID();
+      checkoutKey.current = idempotencyKey;
       if (paymentMethod === 'razorpay') {
         const scriptLoaded = await new Promise<boolean>((resolve) => {
           if (window.Razorpay) return resolve(true);
@@ -103,7 +121,7 @@ export default function CheckoutPage() {
 
         const createResponse = await fetch('/api/payments/create-order', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
           body: JSON.stringify({
             address,
             deliverySlot,
@@ -111,8 +129,13 @@ export default function CheckoutPage() {
             items: items.map((item) => ({ product_id: item.product_id, quantity: item.quantity })),
           }),
         });
-        const created = await createResponse.json();
-        if (!createResponse.ok) throw new Error(created.error || 'Unable to start payment.');
+        const createdPayload: unknown = await createResponse.json().catch(() => null);
+        if (!createResponse.ok) {
+          checkoutKey.current = null;
+          throw new Error(apiError(createdPayload) || 'Unable to start payment.');
+        }
+        if (!isRazorpayOrderResponse(createdPayload)) throw new Error('The payment service returned an invalid response.');
+        const created = createdPayload;
 
         const razorpay = new window.Razorpay({
           key: created.keyId,
@@ -124,8 +147,9 @@ export default function CheckoutPage() {
           prefill: { name: address.full_name, contact: address.phone },
           notes: { order_number: created.orderNumber },
           theme: { color: '#15803d' },
-          handler: async (response: any) => {
+          handler: async (response: unknown) => {
             try {
+              if (!isRazorpaySuccess(response)) throw new Error('Razorpay returned incomplete payment details.');
               const verifyResponse = await fetch('/api/payments/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -136,12 +160,17 @@ export default function CheckoutPage() {
                   razorpay_signature: response.razorpay_signature,
                 }),
               });
-              const verified = await verifyResponse.json();
-              if (!verifyResponse.ok || !verified.verified) throw new Error(verified.error || 'Payment verification is pending.');
+              const verifiedPayload: unknown = await verifyResponse.json().catch(() => null);
+              const verified = typeof verifiedPayload === 'object' && verifiedPayload !== null &&
+                'verified' in verifiedPayload && verifiedPayload.verified === true;
+              if (!verifyResponse.ok || !verified) throw new Error(apiError(verifiedPayload) || 'Payment verification is pending.');
               clearCart();
+              checkoutKey.current = null;
               toast.success('Payment verified! Your order is confirmed.');
               router.push(`/orders/${created.orderNumber}`);
             } catch (verifyError) {
+              clearCart();
+              checkoutKey.current = null;
               console.error('Razorpay verification failed', verifyError);
               toast.error('Payment received but verification is pending. Please do not pay again; refresh your order page shortly.');
               router.push(`/orders/${created.orderNumber}`);
@@ -151,74 +180,45 @@ export default function CheckoutPage() {
           },
           modal: { ondismiss: () => setPlacing(false) },
         });
-        razorpay.on('payment.failed', (response: any) => {
-          console.error('Razorpay payment failed', response?.error?.description || response);
-          toast.error(response?.error?.description || 'Payment failed. Please try again.');
+        razorpay.on('payment.failed', (response: unknown) => {
+          const description = errorDescription(response);
+          console.error('Razorpay payment failed', description || 'No gateway error description provided.');
+          toast.error(description || 'Payment failed. Please try again.');
           setPlacing(false);
         });
         razorpay.open();
         return;
       }
 
-      const orderNumber = `CKS${Date.now().toString().slice(-8)}`;
-      const otp = Math.floor(1000 + Math.random() * 9000).toString();
-
-      const isUpi = ['upi', 'phonepe', 'googlepay', 'paytm'].includes(paymentMethod);
-      const now = new Date().toISOString();
-
-      const orderPayload = {
-        order_number: orderNumber,
-        status: 'pending',
-        payment_method: paymentMethod,
-        payment_status: isUpi ? 'pending_verification' : 'pending',
-        qr_created_at: isUpi ? now : null,
-        subtotal,
-        delivery_charge: deliveryCharge + expressCharge,
-        gst_amount: 0,
-        total_amount: total,
-        address_snapshot: address,
-        delivery_slot: deliverySlot,
-        delivery_otp: otp,
-        is_express: isExpress,
-        created_at: now,
-        updated_at: now,
-      };
-
-      const orderInsertResult = (await supabase.from('orders').insert(orderPayload)) as SupabaseInsertResult<CheckoutOrder>;
-      const orderRows = orderInsertResult?.data;
-      const order = Array.isArray(orderRows)
-        ? orderRows[0] ?? null
-        : orderRows ?? null;
-
-      if (orderInsertResult.error) {
-        throw new Error(orderInsertResult.error.message);
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          address,
+          deliverySlot,
+          isExpress,
+          paymentMethod,
+          items: items.map((item) => ({ product_id: item.product_id, quantity: item.quantity })),
+        }),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(apiError(payload) || 'Could not place your order.');
+      if (typeof payload !== 'object' || payload === null || !('order' in payload) ||
+          typeof payload.order !== 'object' || payload.order === null ||
+          !('order_number' in payload.order) || typeof payload.order.order_number !== 'string') {
+        throw new Error('The order service returned an invalid response.');
       }
-
-      if (!order?.id) {
-        throw new Error('Order creation did not return a valid order id.');
-      }
-
-      const orderItemsPayload = items.map((item) => ({
-        order_id: order.id,
-        product_id: item.product_id,
-        product_name: item.product.name,
-        product_image: item.product.image_url,
-        brand: item.product.brand,
-        unit: item.product.unit,
-        price: item.product.price,
-        quantity: item.quantity,
-        gst_percent: item.product.gst_percent,
-        created_at: now,
-      }));
-
-      await supabase.from('order_items').insert(orderItemsPayload);
 
       clearCart();
+      checkoutKey.current = null;
       toast.success('Order placed successfully!');
-      router.push(`/orders/${orderNumber}`);
+      router.push(`/orders/${payload.order.order_number}`);
     } catch (err) {
       console.error('Place order failed', err);
-      toast.error('Failed to place order. Please try again.');
+      toast.error(err instanceof Error ? err.message : 'Failed to place order. Please try again.');
       setPlacing(false);
     }
   };

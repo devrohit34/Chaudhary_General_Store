@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase, Order } from '@/lib/supabase';
+import type { Order, OrderItem } from '@/lib/store-types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -11,20 +11,28 @@ import { TrendingUp, IndianRupee, ShoppingCart, Package, Calendar, BarChart3 } f
 import { Button } from '@/components/ui/button';
 
 type Period = '7d' | '30d' | '90d';
+type ReportOrder = Order & { order_items?: OrderItem[] };
 
 export default function ReportsPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<ReportOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<Period>('30d');
 
   useEffect(() => {
     async function fetchData() {
-      const { data } = await supabase
-        .from('orders')
-        .select('*, order_items(*)')
-        .order('created_at', { ascending: true });
-      setOrders((data as any) || []);
-      setLoading(false);
+      try {
+        const response = await fetch('/api/admin/reports', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Reports could not be loaded.');
+        const payload: unknown = await response.json();
+        if (typeof payload !== 'object' || payload === null || !('orders' in payload) || !Array.isArray(payload.orders)) {
+          throw new Error('Report service returned invalid data.');
+        }
+        setOrders(payload.orders as ReportOrder[]);
+      } catch (error) {
+        console.error('Admin report load failed:', error instanceof Error ? error.message : 'Unknown error');
+      } finally {
+        setLoading(false);
+      }
     }
     fetchData();
   }, []);
@@ -72,8 +80,8 @@ export default function ReportsPage() {
 
   // Best selling products (from order items)
   const productMap: Record<string, { name: string; qty: number; revenue: number }> = {};
-  (periodOrders as any[]).forEach((o) => {
-    (o.order_items || []).forEach((item: any) => {
+  periodOrders.forEach((o) => {
+    (o.order_items || []).forEach((item) => {
       if (!productMap[item.product_name]) {
         productMap[item.product_name] = { name: item.product_name, qty: 0, revenue: 0 };
       }

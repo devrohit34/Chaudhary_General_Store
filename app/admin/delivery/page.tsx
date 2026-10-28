@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase, Order } from '@/lib/supabase';
+import type { Order } from '@/lib/store-types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -30,24 +30,36 @@ export default function DeliveryPage() {
 
   async function fetchOrders() {
     setLoading(true);
-    const { data } = await supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: false });
-    setOrders(data || []);
-    setLoading(false);
+    try {
+      const response = await fetch('/api/admin/orders', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Delivery orders could not be loaded.');
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('orders' in payload) || !Array.isArray(payload.orders)) {
+        throw new Error('Order service returned invalid data.');
+      }
+      setOrders(payload.orders as Order[]);
+    } catch (error) {
+      console.error('Delivery order list failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Delivery orders could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   const updateStatus = async (id: string, status: string) => {
-    const { error } = await supabase
-      .from('orders')
-      .update({
-        status,
-        delivered_at: status === 'delivered' ? new Date().toISOString() : null,
-      })
-      .eq('id', id);
-    if (error) toast.error('Failed to update status');
-    else { toast.success('Delivery status updated'); fetchOrders(); }
+    try {
+      const response = await fetch(`/api/admin/orders/${encodeURIComponent(id)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!response.ok) throw new Error('Delivery status could not be updated.');
+      toast.success('Delivery status updated');
+      await fetchOrders();
+    } catch (error) {
+      console.error('Delivery status update failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to update status');
+    }
   };
 
   const filtered = orders.filter((o) => {

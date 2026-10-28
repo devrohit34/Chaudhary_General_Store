@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Timer, RefreshCw, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,7 +11,6 @@ const MERCHANT_NAME = 'Chaudhary General Store';
 const QR_DURATION_SECONDS = 600; // 10 minutes
 
 interface UpiDynamicQrProps {
-  orderId: string;
   orderNumber: string;
   amount: number;
   qrCreatedAt: string | null;
@@ -20,7 +18,7 @@ interface UpiDynamicQrProps {
   disabled?: boolean;
 }
 
-export function UpiDynamicQr({ orderId, orderNumber, amount, qrCreatedAt, onRefresh, disabled }: UpiDynamicQrProps) {
+export function UpiDynamicQr({ orderNumber, amount, qrCreatedAt, onRefresh, disabled }: UpiDynamicQrProps) {
   const [secondsLeft, setSecondsLeft] = useState(QR_DURATION_SECONDS);
   const [expired, setExpired] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -58,15 +56,18 @@ export function UpiDynamicQr({ orderId, orderNumber, amount, qrCreatedAt, onRefr
   const regenerateQr = async () => {
     setRegenerating(true);
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({ qr_created_at: new Date().toISOString() })
-        .eq('id', orderId);
-      if (error) throw error;
+      const response = await fetch(`/api/orders/${encodeURIComponent(orderNumber)}/qr`, { method: 'PATCH' });
+      if (!response.ok) {
+        const payload: unknown = await response.json().catch(() => null);
+        const message = typeof payload === 'object' && payload !== null && 'error' in payload &&
+          typeof payload.error === 'string' ? payload.error : 'A new payment QR could not be generated.';
+        throw new Error(message);
+      }
       toast.success('New QR code generated — you have 10 minutes to complete payment');
       onRefresh();
-    } catch {
-      toast.error('Failed to regenerate QR code');
+    } catch (error) {
+      console.error('UPI QR regeneration failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to regenerate QR code');
     }
     setRegenerating(false);
   };

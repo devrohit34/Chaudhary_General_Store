@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { supabase, Product } from '@/lib/supabase';
+import type { Product } from '@/lib/store-types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,12 +28,20 @@ export default function InventoryPage() {
 
   async function fetchProducts() {
     setLoading(true);
-    const { data } = await supabase
-      .from('products')
-      .select('*')
-      .order('stock_quantity', { ascending: true });
-    setProducts(data || []);
-    setLoading(false);
+    try {
+      const response = await fetch('/api/admin/products', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Inventory could not be loaded.');
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('products' in payload) || !Array.isArray(payload.products)) {
+        throw new Error('Product service returned invalid data.');
+      }
+      setProducts((payload.products as Product[]).sort((a, b) => a.stock_quantity - b.stock_quantity));
+    } catch (error) {
+      console.error('Inventory load failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Inventory could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   const updateStock = async () => {
@@ -44,18 +52,22 @@ export default function InventoryPage() {
       return;
     }
     setSaving(true);
-    const { error } = await supabase
-      .from('products')
-      .update({ stock_quantity: qty })
-      .eq('id', editing.id);
-    if (error) {
-      toast.error('Failed to update stock');
-    } else {
+    try {
+      const response = await fetch(`/api/admin/products/${encodeURIComponent(editing.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stock_quantity: qty }),
+      });
+      if (!response.ok) throw new Error('Stock could not be updated.');
       toast.success(`Stock updated to ${qty}`);
       setEditing(null);
-      fetchProducts();
+      await fetchProducts();
+    } catch (error) {
+      console.error('Inventory update failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to update stock');
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const getStockStatus = (p: Product) => {

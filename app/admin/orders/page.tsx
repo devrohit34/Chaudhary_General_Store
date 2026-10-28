@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useState, useCallback } from 'react';
-import { supabase, Order, OrderItem } from '@/lib/supabase';
+import type { Order, OrderItem } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -60,24 +60,20 @@ export default function AdminOrdersPage() {
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
-    const { data: ordersData } = await supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (ordersData) {
-      const ordersWithItems = await Promise.all(
-        ordersData.map(async (order) => {
-          const { data: items } = await supabase
-            .from('order_items')
-            .select('*')
-            .eq('order_id', order.id);
-          return { ...order, order_items: items || [] };
-        })
-      );
-      setOrders(ordersWithItems);
+    try {
+      const response = await fetch('/api/admin/orders', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Orders could not be loaded.');
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('orders' in payload) || !Array.isArray(payload.orders)) {
+        throw new Error('Order service returned invalid data.');
+      }
+      setOrders(payload.orders as OrderWithItems[]);
+    } catch (error) {
+      console.error('Admin order list failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Orders could not be loaded.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -96,72 +92,62 @@ export default function AdminOrdersPage() {
 
   const updateOrderStatus = async (orderId: string, status: OrderStatus) => {
     setProcessing(true);
-    const updateData: Record<string, unknown> = { status };
-    if (status === 'delivered') {
-      updateData.delivered_at = new Date().toISOString();
-    }
-    const { error } = await supabase
-      .from('orders')
-      .update(updateData)
-      .eq('id', orderId);
-    if (error) {
-      toast.error('Failed to update order status');
-    } else {
+    try {
+      const response = await fetch(`/api/admin/orders/${encodeURIComponent(orderId)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!response.ok) throw new Error('Order status could not be updated.');
       toast.success(`Order marked as ${status.replace(/_/g, ' ')}`);
-      fetchOrders();
+      await fetchOrders();
+    } catch (error) {
+      console.error('Order status update failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to update order status');
     }
-    setProcessing(false);
+    finally { setProcessing(false); }
   };
 
   const verifyPayment = async (order: OrderWithItems) => {
     setProcessing(true);
-    const { error } = await supabase
-      .from('orders')
-      .update({
-        payment_status: 'paid',
-        upi_verified_at: new Date().toISOString(),
-        upi_rejected_reason: null,
-        status: 'confirmed',
-      })
-      .eq('id', order.id);
-    if (error) {
-      toast.error('Failed to verify payment');
-    } else {
+    try {
+      const response = await fetch(`/api/admin/orders/${encodeURIComponent(order.id)}/payment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve' }),
+      });
+      if (!response.ok) throw new Error('Payment could not be verified.');
       toast.success('Payment verified successfully');
-      fetchOrders();
+      await fetchOrders();
+    } catch (error) {
+      console.error('Manual payment approval failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to verify payment');
     }
-    setProcessing(false);
+    finally { setProcessing(false); }
   };
 
   const rejectPayment = async () => {
     if (!rejectDialog) return;
     setProcessing(true);
-    const { error } = await supabase
-      .from('orders')
-      .update({
-        payment_status: 'rejected',
-        upi_rejected_reason: rejectReason || 'Payment could not be verified',
-      })
-      .eq('id', rejectDialog.id);
-    if (error) {
-      toast.error('Failed to reject payment');
-    } else {
+    try {
+      const response = await fetch(`/api/admin/orders/${encodeURIComponent(rejectDialog.id)}/payment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject', reason: rejectReason }),
+      });
+      if (!response.ok) throw new Error('Payment could not be rejected.');
       toast.success('Payment rejected');
       setRejectDialog(null);
       setRejectReason('');
-      fetchOrders();
+      await fetchOrders();
+    } catch (error) {
+      console.error('Manual payment rejection failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to reject payment');
     }
-    setProcessing(false);
+    finally { setProcessing(false); }
   };
 
   const openOrderDetails = async (order: OrderWithItems) => {
-    if (!order.order_items || order.order_items.length === 0) {
-      const { data: items } = await supabase
-        .from('order_items')
-        .select('*')
-        .eq('order_id', order.id);
-      order.order_items = items || [];
-    }
     setSelectedOrder(order);
     setDetailsOpen(true);
   };

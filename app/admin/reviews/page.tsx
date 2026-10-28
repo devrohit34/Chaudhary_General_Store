@@ -2,7 +2,6 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Star, Trash2, CheckCircle, Search } from 'lucide-react';
@@ -33,28 +32,49 @@ export default function ReviewsPage() {
 
   async function fetchReviews() {
     setLoading(true);
-    const { data } = await supabase
-      .from('reviews')
-      .select('*, products(name, image_url), user_profiles(full_name)')
-      .order('created_at', { ascending: false });
-    setReviews((data as any) || []);
-    setLoading(false);
+    try {
+      const response = await fetch('/api/admin/reviews', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Reviews could not be loaded.');
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('reviews' in payload) || !Array.isArray(payload.reviews)) {
+        throw new Error('Review service returned invalid data.');
+      }
+      setReviews(payload.reviews as Review[]);
+    } catch (error) {
+      console.error('Admin review list failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Reviews could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   const deleteReview = async (id: string) => {
     if (!confirm('Delete this review?')) return;
-    const { error } = await supabase.from('reviews').delete().eq('id', id);
-    if (error) toast.error('Failed to delete review');
-    else { toast.success('Review deleted'); fetchReviews(); }
+    try {
+      const response = await fetch(`/api/admin/reviews/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Review could not be deleted.');
+      toast.success('Review deleted');
+      await fetchReviews();
+    } catch (error) {
+      console.error('Admin review delete failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete review');
+    }
   };
 
   const toggleVerified = async (review: Review) => {
-    const { error } = await supabase
-      .from('reviews')
-      .update({ is_verified: !review.is_verified })
-      .eq('id', review.id);
-    if (error) toast.error('Failed to update');
-    else { toast.success(review.is_verified ? 'Review unverified' : 'Review verified'); fetchReviews(); }
+    try {
+      const response = await fetch(`/api/admin/reviews/${encodeURIComponent(review.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_verified: !review.is_verified }),
+      });
+      if (!response.ok) throw new Error('Review could not be updated.');
+      toast.success(review.is_verified ? 'Review unverified' : 'Review verified');
+      await fetchReviews();
+    } catch (error) {
+      console.error('Admin review update failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to update');
+    }
   };
 
   const renderStars = (rating: number) =>

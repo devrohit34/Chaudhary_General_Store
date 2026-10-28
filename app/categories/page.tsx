@@ -2,18 +2,29 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { supabase, Category } from '@/lib/supabase';
+import type { Category } from '@/lib/store-types';
 import { ChevronRight } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.from('categories').select('*').order('sort_order').then(({ data }) => {
-      setCategories(data || []);
-      setLoading(false);
-    });
+    fetch('/api/catalog/categories', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Categories are temporarily unavailable.');
+        const payload: unknown = await response.json();
+        if (typeof payload !== 'object' || payload === null || !('categories' in payload) || !Array.isArray(payload.categories)) {
+          throw new Error('Category service returned invalid data.');
+        }
+        setCategories(payload.categories as Category[]);
+      })
+      .catch((error: unknown) => {
+        console.error('Category catalog load failed:', error instanceof Error ? error.message : 'Unknown error');
+        toast.error(error instanceof Error ? error.message : 'Categories are temporarily unavailable.');
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   return (

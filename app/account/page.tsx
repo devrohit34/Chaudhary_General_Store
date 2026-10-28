@@ -2,8 +2,8 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
 import { useCart } from '@/lib/cart-context';
+import type { CustomerSession } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,9 +13,26 @@ import { User, Mail, Phone, Heart, Package, MapPin, LogOut, Star } from 'lucide-
 import Link from 'next/link';
 import { toast } from 'sonner';
 
+function readApiError(value: unknown) {
+  return typeof value === 'object' && value !== null && 'error' in value && typeof value.error === 'string'
+    ? value.error
+    : null;
+}
+
+function readSessionUser(value: unknown): CustomerSession {
+  if (typeof value !== 'object' || value === null || !('user' in value) ||
+      typeof value.user !== 'object' || value.user === null ||
+      !('id' in value.user) || typeof value.user.id !== 'string' ||
+      !('email' in value.user) || typeof value.user.email !== 'string' ||
+      !('full_name' in value.user) || typeof value.user.full_name !== 'string') {
+    throw new Error('Account service returned invalid user data.');
+  }
+  return { id: value.user.id, email: value.user.email, full_name: value.user.full_name };
+}
+
 export default function AccountPage() {
   const { wishlist, recentlyViewed } = useCart();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<CustomerSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -23,38 +40,68 @@ export default function AccountPage() {
   const [fullName, setFullName] = useState('');
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user || null);
-      setLoading(false);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user || null);
-    });
-    return () => listener.subscription.unsubscribe();
+    let active = true;
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Account session is unavailable.');
+        return response.json();
+      })
+      .then((payload: unknown) => {
+        if (active && typeof payload === 'object' && payload !== null && 'user' in payload) {
+          setUser(payload.user as CustomerSession | null);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('Account session lookup failed:', error instanceof Error ? error.message : 'Unknown error');
+        if (active) toast.error('Could not load your account. Please try again.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
   }, []);
 
   const signUp = async () => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) toast.error(error.message);
-    else {
-      if (email && fullName) {
-        await supabase.from('user_profiles').upsert({
-          id: data.user?.id, full_name: fullName, phone, email,
-        });
-      }
-      toast.success('Account created! Check your email.');
+    try {
+      const response = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, fullName, phone }),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readApiError(payload) || 'Account creation failed.');
+      setUser(readSessionUser(payload));
+      toast.success('Account created successfully.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Account creation failed.');
     }
   };
 
   const signIn = async () => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) toast.error(error.message);
-    else toast.success('Welcome back!');
+    try {
+      const response = await fetch('/api/auth/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(readApiError(payload) || 'Sign-in failed.');
+      setUser(readSessionUser(payload));
+      toast.success('Welcome back!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Sign-in failed.');
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    toast.success('Signed out');
+    try {
+      const response = await fetch('/api/auth/session', { method: 'DELETE' });
+      if (!response.ok) throw new Error('Sign-out failed.');
+      setUser(null);
+      toast.success('Signed out');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Sign-out failed.');
+    }
   };
 
   if (loading) {

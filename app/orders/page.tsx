@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { supabase, Order } from '@/lib/supabase';
+import type { Order } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ChevronRight, Package, Clock, CheckCircle, Truck, XCircle } from 'lucide-react';
@@ -24,24 +24,20 @@ export default function OrdersPage() {
 
   useEffect(() => {
     async function fetchOrders() {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      if (!error && data) {
-        const ordersWithItems = await Promise.all(
-          data.map(async (order) => {
-            const { data: items } = await supabase
-              .from('order_items')
-              .select('*')
-              .eq('order_id', order.id);
-            return { ...order, order_items: items || [] };
-          })
-        );
-        setOrders(ordersWithItems);
+      try {
+        const response = await fetch('/api/orders', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Orders are temporarily unavailable.');
+        const payload: unknown = await response.json();
+        if (typeof payload !== 'object' || payload === null || !('orders' in payload) || !Array.isArray(payload.orders)) {
+          throw new Error('Order service returned invalid data.');
+        }
+        setOrders(payload.orders as Order[]);
+      } catch (error) {
+        console.error('Order list failed:', error instanceof Error ? error.message : 'Unknown error');
+        setOrders([]);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     fetchOrders();
   }, []);

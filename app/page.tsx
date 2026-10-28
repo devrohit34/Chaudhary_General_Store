@@ -3,10 +3,11 @@
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { supabase, Category, Product } from '@/lib/supabase';
+import type { Category, Product } from '@/lib/store-types';
 import { ProductCard } from '@/components/product-card';
 import { Button } from '@/components/ui/button';
 import { Truck, Clock, ShieldCheck, ChevronRight, Package } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function HomePage() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -15,13 +16,30 @@ export default function HomePage() {
 
   useEffect(() => {
     async function fetchData() {
-      const [catRes, prodRes] = await Promise.all([
-        supabase.from('categories').select('*').order('sort_order').limit(15),
-        supabase.from('products').select('*').eq('is_active', true).order('created_at', { ascending: false }).limit(20),
-      ]);
-      setCategories(catRes.data || []);
-      setProducts(prodRes.data || []);
-      setLoading(false);
+      try {
+        const [categoryResponse, productResponse] = await Promise.all([
+          fetch('/api/catalog/categories', { cache: 'no-store' }),
+          fetch('/api/catalog/products?limit=20', { cache: 'no-store' }),
+        ]);
+        if (!categoryResponse.ok || !productResponse.ok) throw new Error('Store catalog is temporarily unavailable.');
+        const [categoryPayload, productPayload]: unknown[] = await Promise.all([
+          categoryResponse.json(),
+          productResponse.json(),
+        ]);
+        if (typeof categoryPayload !== 'object' || categoryPayload === null ||
+            !('categories' in categoryPayload) || !Array.isArray(categoryPayload.categories) ||
+            typeof productPayload !== 'object' || productPayload === null ||
+            !('products' in productPayload) || !Array.isArray(productPayload.products)) {
+          throw new Error('Store catalog returned invalid data.');
+        }
+        setCategories((categoryPayload.categories as Category[]).slice(0, 15));
+        setProducts(productPayload.products as Product[]);
+      } catch (error) {
+        console.error('Home catalog load failed:', error instanceof Error ? error.message : 'Unknown error');
+        toast.error(error instanceof Error ? error.message : 'Store catalog is temporarily unavailable.');
+      } finally {
+        setLoading(false);
+      }
     }
     fetchData();
   }, []);

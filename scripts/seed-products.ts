@@ -1,11 +1,6 @@
-let supabase: any;
-try {
-  // use require so script can run standalone even if ESM resolution differs
-  const mod = await import('../lib/supabase');
-  supabase = mod.supabase;
-} catch (e) {
-  supabase = null;
-}
+import './load-env';
+import { getPrisma } from '../lib/prisma-client';
+import { rupeesToPaise } from '../lib/money';
 
 type SeedProduct = {
   name: string;
@@ -180,54 +175,55 @@ function slugify(text = '') {
     .replace(/^-|-$/g, '');
 }
 
+function uniqueProductSlug(name: string, index: number) {
+  const slug = slugify(name);
+  return PRODUCTS.findIndex((product) => slugify(product.name) === slug) === index
+    ? slug
+    : `${slug}-${index + 1}`;
+}
+
 async function ensureCategory(name?: string) {
   if (!name) return null;
   const slug = slugify(name);
-  // try find
-  const { data: existing } = await supabase.from('categories').select('*').eq('slug', slug).limit(1).maybeSingle();
+  const prisma = getPrisma();
+  const existing = await prisma.category.findUnique({ where: { slug }, select: { id: true } });
   if (existing) return existing.id;
-
-  const { data, error } = await supabase.from('categories').insert({ name, slug, description: null, image_url: null }).select().maybeSingle();
-  if (error) {
-    console.error('Category insert error', name, error);
-    return null;
-  }
-  return data?.id ?? null;
+  const category = await prisma.category.create({ data: { name, slug } });
+  return category.id;
 }
 
-async function upsertProduct(p: SeedProduct) {
+async function upsertProduct(p: SeedProduct, index: number) {
   const categoryName = p.category || inferCategoryFromName(p.name);
   const category_id = await ensureCategory(categoryName ?? undefined);
 
-  const slug = slugify(p.name);
-  const payload = {
-    category_id,
+  const slug = uniqueProductSlug(p.name, index);
+  const prisma = getPrisma();
+  const values = {
+    categoryId: category_id,
     name: p.name,
-    slug,
     description: null,
     brand: 'Chaudhary General Store',
-    price: Number(p.price),
-    original_price: p.mrp ? Number(p.mrp) : null,
-    discount_percent: 0,
+    pricePaise: rupeesToPaise(p.price),
+    originalPricePaise: p.mrp ? rupeesToPaise(p.mrp) : null,
+    discountPercent: 0,
     unit: p.unit ?? 'piece',
     weight: p.unit ?? null,
-    stock_quantity: 100,
-    min_stock_alert: 10,
-    image_url: p.image ?? null,
+    stockQuantity: 100,
+    minStockAlert: 10,
+    imageUrl: p.image ?? null,
     images: p.image ? [p.image] : [],
     tags: [],
-    is_active: true,
-    is_featured: false,
-    is_flash_sale: false,
-    gst_percent: 5,
+    isActive: true,
+    isFeatured: false,
+    isFlashSale: false,
+    gstBasisPoints: 500,
   };
-
-  const { data, error } = await supabase.from('products').upsert(payload, { onConflict: 'slug' }).select().limit(1).maybeSingle();
-  if (error) {
-    console.error('Upsert product error', p.name, error);
-    return false;
-  }
-  return !!data;
+  await prisma.product.upsert({
+    where: { slug },
+    create: { id: `p_${index + 1}`, slug, ...values },
+    update: values,
+  });
+  return true;
 }
 
 function inferCategoryFromName(name: string) {
@@ -248,20 +244,21 @@ function inferCategoryFromName(name: string) {
 }
 
 async function run() {
+  const prisma = getPrisma();
   console.log('Seeding products:', PRODUCTS.length);
   let success = 0;
-  for (const p of PRODUCTS) {
-    try {
-      const ok = await upsertProduct(p);
-      if (ok) success++;
-    } catch (err) {
-      console.error('Unexpected error while seeding', p.name, err);
+  try {
+    for (const [index, product] of PRODUCTS.entries()) {
+      await upsertProduct(product, index);
+      success++;
     }
+    console.log(`Seed complete. Upserted ${success}/${PRODUCTS.length} products.`);
+  } finally {
+    await prisma.$disconnect();
   }
-  console.log(`Seed complete. Upserted ${success}/${PRODUCTS.length} products.`);
 }
 
-if (supabase && !process.argv.includes('--export-local')) {
+if (process.argv.includes('--seed-neon')) {
   run().catch((e) => {
     console.error('Seed run failed', e);
     process.exit(1);
@@ -284,16 +281,32 @@ if (process.argv.includes('--export-local')) {
 
     const now = new Date().toISOString();
     const seedPath = path.join(process.cwd(), 'data', 'local-seed.json');
-    let seed: any = { categories: [], products: [] };
+    type LocalCategory = { id: string; name: string };
+    type LocalSeed = { categories: LocalCategory[]; products: Record<string, unknown>[] };
+    let seed: LocalSeed = { categories: [], products: [] };
     try {
-      seed = JSON.parse(fs.readFileSync(seedPath, 'utf8') as any);
-    } catch (e) {}
+      const parsed: unknown = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+      if (typeof parsed !== 'object' || parsed === null || !('categories' in parsed) ||
+          !Array.isArray(parsed.categories)) throw new Error('Local seed file has invalid category data.');
+      const categories = parsed.categories.filter((category): category is LocalCategory =>
+        typeof category === 'object' && category !== null &&
+        'id' in category && typeof category.id === 'string' &&
+        'name' in category && typeof category.name === 'string'
+      );
+      seed = { categories, products: [] };
+    } catch (error) {
+      console.error('Local seed data could not be read:', error instanceof Error ? error.message : 'Unknown error');
+      process.exit(1);
+    }
 
     const categoryMap: Record<string, string> = {};
-    (seed.categories || []).forEach((c: any) => (categoryMap[c.name] = c.id));
+    seed.categories.forEach((category) => { categoryMap[category.name] = category.id; });
 
     const productsOut = PRODUCTS.map((p, idx) => {
-      const slug = slugifyLocal(p.name);
+      const baseSlug = slugifyLocal(p.name);
+      const slug = PRODUCTS.findIndex((product) => slugifyLocal(product.name) === baseSlug) === idx
+        ? baseSlug
+        : `${baseSlug}-${idx + 1}`;
       const categoryName = p.category || inferCategoryFromName(p.name);
       const category_id = categoryMap[categoryName] || categoryMap['Other'] || null;
       return {

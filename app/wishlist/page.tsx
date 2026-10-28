@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useCart } from '@/lib/cart-context';
-import { supabase, Product } from '@/lib/supabase';
+import type { Product } from '@/lib/store-types';
 import { ProductCard } from '@/components/product-card';
 import { Button } from '@/components/ui/button';
 import { Heart, ChevronRight } from 'lucide-react';
@@ -20,9 +20,20 @@ export default function WishlistPage() {
         setLoading(false);
         return;
       }
-      const { data } = await supabase.from('products').select('*').in('id', wishlist);
-      setProducts(data || []);
-      setLoading(false);
+      try {
+        const response = await fetch(`/api/catalog/products?ids=${encodeURIComponent(wishlist.join(','))}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Wishlist products could not be loaded.');
+        const payload: unknown = await response.json();
+        if (typeof payload !== 'object' || payload === null || !('products' in payload) || !Array.isArray(payload.products)) {
+          throw new Error('Product catalog returned invalid data.');
+        }
+        setProducts(payload.products as Product[]);
+      } catch (error) {
+        console.error('Wishlist lookup failed:', error instanceof Error ? error.message : 'Unknown error');
+        setProducts([]);
+      } finally {
+        setLoading(false);
+      }
     }
     fetchWishlist();
   }, [wishlist]);

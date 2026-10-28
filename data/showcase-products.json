@@ -1,0 +1,93 @@
+{
+  "categories": [
+    {
+      "id": "c_pulses_dal",
+      "name": "Pulses & Dal",
+      "slug": "pulses-dal",
+      "sort_order": 1,
+      "is_active": true
+    },
+    {
+      "id": "c_rice",
+      "name": "Rice",
+      "slug": "rice",
+      "sort_order": 2,
+      "is_active": true
+    },
+    {
+      "id": "c_spices",
+      "name": "Spices",
+      "slug": "spices",
+      "sort_order": 3,
+      "is_active": true
+    },
+    {
+      "id": "c_oils",
+      "name": "Oils",
+      "slug": "oils",
+      "sort_order": 4,
+      "is_active": true
+    }
+  ],
+  "products": [
+    {
+      "id": "showcase-chana-daal-1kg",
+      "category_id": "c_pulses_dal",
+      "name": "Chana Daal 1Kg",
+      "slug": "showcase-chana-daal-1kg",
+      "brand": "Chaudhary General Store",
+      "price": 80,
+      "original_price": 90,
+      "unit": "1 Kg",
+      "weight": "1 Kg",
+      "stock_quantity": 100,
+      "image_url": "https://cdn.pixabay.com/photo/2013/07/25/12/03/chana-166987_1280.jpg",
+      "is_active": true,
+      "is_featured": true
+    },
+    {
+      "id": "showcase-raja-ji-chawal-1kg",
+      "category_id": "c_rice",
+      "name": "Raja Ji Chawal 1Kg",
+      "slug": "showcase-raja-ji-chawal-1kg",
+      "brand": "Chaudhary General Store",
+      "price": 40,
+      "original_price": 45,
+      "unit": "1 Kg",
+      "weight": "1 Kg",
+      "stock_quantity": 100,
+      "image_url": "https://5.imimg.com/data5/SELLER/Default/2022/4/FD/AA/FL/28275880/raja-ji-premium-quality-silky-sortex-parboiled-rice.jpg",
+      "is_active": true,
+      "is_featured": true
+    },
+    {
+      "id": "showcase-yellow-mustard-seeds-500gm",
+      "category_id": "c_spices",
+      "name": "Peela Sarso (Yellow Mustard Seeds) 500gm",
+      "slug": "showcase-yellow-mustard-seeds-500gm",
+      "brand": "Chaudhary General Store",
+      "price": 90,
+      "original_price": 100,
+      "unit": "500 gm",
+      "weight": "500 gm",
+      "stock_quantity": 100,
+      "image_url": "https://m.media-amazon.com/images/I/51rQ609hcSS._AC_UF894,1000_QL80_.jpg",
+      "is_active": true,
+      "is_featured": true
+    },
+    {
+      "id": "showcase-scooter-mustard-oil-1l",
+      "category_id": "c_oils",
+      "name": "Scooter Sarso tel (Grade - 1) 1litre",
+      "slug": "showcase-scooter-mustard-oil-1l",
+      "brand": "Chaudhary General Store",
+      "price": 170,
+      "unit": "1 Litre",
+      "weight": "1 Litre",
+      "stock_quantity": 100,
+      "image_url": "https://rukminim2.flixcart.com/image/480/640/xif0q/edible-oil/x/j/s/1-kachchi-ghani-pouch-1-mustard-oil-scooter-original-imagueaaxdbq7s8b.jpeg?q=90",
+      "is_active": true,
+      "is_featured": true
+    }
+  ]
+}

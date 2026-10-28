@@ -2,10 +2,11 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { supabase, Product } from '@/lib/supabase';
+import type { Product } from '@/lib/store-types';
 import { ProductCard } from '@/components/product-card';
 import { Input } from '@/components/ui/input';
 import { Search } from 'lucide-react';
+import { toast } from 'sonner';
 
 function SearchContent() {
   const searchParams = useSearchParams();
@@ -26,13 +27,21 @@ function SearchContent() {
         return;
       }
       setLoading(true);
-      const { data } = await supabase
-        .from('products')
-        .select('*')
-        .or(`name.ilike.%${query}%,name_hi.ilike.%${query}%,brand.ilike.%${query}%,description.ilike.%${query}%`)
-        .limit(50);
-      setProducts(data || []);
-      setLoading(false);
+      try {
+        const response = await fetch(`/api/catalog/products?search=${encodeURIComponent(query)}&limit=50`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Search is temporarily unavailable.');
+        const payload: unknown = await response.json();
+        if (typeof payload !== 'object' || payload === null || !('products' in payload) || !Array.isArray(payload.products)) {
+          throw new Error('Product catalog returned invalid data.');
+        }
+        setProducts(payload.products as Product[]);
+      } catch (error) {
+        console.error('Product search failed:', error instanceof Error ? error.message : 'Unknown error');
+        setProducts([]);
+        toast.error(error instanceof Error ? error.message : 'Search is temporarily unavailable.');
+      } finally {
+        setLoading(false);
+      }
     }
     search();
   }, [query]);

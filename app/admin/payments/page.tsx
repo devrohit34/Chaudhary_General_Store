@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
-import { supabase, Order } from '@/lib/supabase';
+import type { Order } from '@/lib/store-types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -39,37 +39,61 @@ export default function PaymentsPage() {
 
   async function fetchOrders() {
     setLoading(true);
-    const { data } = await supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: false });
-    setOrders(data || []);
-    setLoading(false);
+    try {
+      const response = await fetch('/api/admin/orders', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Payments could not be loaded.');
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('orders' in payload) || !Array.isArray(payload.orders)) {
+        throw new Error('Order service returned invalid data.');
+      }
+      setOrders(payload.orders as Order[]);
+    } catch (error) {
+      console.error('Admin payment list failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Payments could not be loaded.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   const verifyPayment = async (order: Order) => {
     setProcessing(true);
-    const { error } = await supabase.from('orders').update({
-      payment_status: 'paid',
-      upi_verified_at: new Date().toISOString(),
-      upi_rejected_reason: null,
-      status: 'confirmed',
-    }).eq('id', order.id);
-    if (error) toast.error('Failed to verify');
-    else { toast.success('Payment verified'); fetchOrders(); }
-    setProcessing(false);
+    try {
+      const response = await fetch(`/api/admin/orders/${encodeURIComponent(order.id)}/payment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve' }),
+      });
+      if (!response.ok) throw new Error('Payment could not be verified.');
+      toast.success('Payment verified');
+      await fetchOrders();
+    } catch (error) {
+      console.error('Manual payment approval failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to verify');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const rejectPayment = async () => {
     if (!rejectDialog) return;
     setProcessing(true);
-    const { error } = await supabase.from('orders').update({
-      payment_status: 'rejected',
-      upi_rejected_reason: rejectReason || 'Payment could not be verified',
-    }).eq('id', rejectDialog.id);
-    if (error) toast.error('Failed to reject');
-    else { toast.success('Payment rejected'); setRejectDialog(null); setRejectReason(''); fetchOrders(); }
-    setProcessing(false);
+    try {
+      const response = await fetch(`/api/admin/orders/${encodeURIComponent(rejectDialog.id)}/payment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject', reason: rejectReason }),
+      });
+      if (!response.ok) throw new Error('Payment could not be rejected.');
+      toast.success('Payment rejected');
+      setRejectDialog(null);
+      setRejectReason('');
+      await fetchOrders();
+    } catch (error) {
+      console.error('Manual payment rejection failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to reject');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const upiOrders = orders.filter((o) => ['upi', 'phonepe', 'googlepay', 'paytm'].includes(o.payment_method));
@@ -180,6 +204,7 @@ export default function PaymentsPage() {
                           alt="Screenshot"
                           width={64}
                           height={64}
+                          unoptimized
                           className="h-16 w-16 rounded-lg border object-cover cursor-pointer hover:opacity-80"
                           onClick={() => window.open(order.payment_screenshot_url!, '_blank')}
                         />

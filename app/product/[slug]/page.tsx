@@ -4,7 +4,7 @@ import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase, Product, Review } from '@/lib/supabase';
+import type { Product, Review } from '@/lib/store-types';
 import { useCart } from '@/lib/cart-context';
 import { ProductCard } from '@/components/product-card';
 import { Button } from '@/components/ui/button';
@@ -25,28 +25,49 @@ export default function ProductDetailPage() {
 
   useEffect(() => {
     async function fetchData() {
-      const { data: prod } = await supabase.from('products').select('*').eq('slug', slug).single();
-      if (prod) {
+      try {
+        const productResponse = await fetch(`/api/catalog/products?slug=${encodeURIComponent(slug)}&limit=1`, { cache: 'no-store' });
+        if (!productResponse.ok) throw new Error('Product is temporarily unavailable.');
+        const productPayload: unknown = await productResponse.json();
+        if (typeof productPayload !== 'object' || productPayload === null ||
+            !('products' in productPayload) || !Array.isArray(productPayload.products)) {
+          throw new Error('Product catalog returned invalid data.');
+        }
+        const prod = (productPayload.products as Product[])[0] || null;
+        if (!prod) return;
         setProduct(prod);
         addRecentlyViewed(prod);
+        const requests: Promise<Response>[] = [
+          fetch(`/api/catalog/reviews?productId=${encodeURIComponent(prod.id)}`, { cache: 'no-store' }),
+        ];
         if (prod.category_id) {
-          const { data: rel } = await supabase
-            .from('products')
-            .select('*')
-            .eq('category_id', prod.category_id)
-            .neq('id', prod.id)
-            .limit(5);
-          setRelated(rel || []);
+          requests.push(fetch(
+            `/api/catalog/products?categoryId=${encodeURIComponent(prod.category_id)}&excludeId=${encodeURIComponent(prod.id)}&limit=5`,
+            { cache: 'no-store' }
+          ));
         }
-        const { data: rev } = await supabase
-          .from('reviews')
-          .select('*')
-          .eq('product_id', prod.id)
-          .order('created_at', { ascending: false })
-          .limit(10);
-        setReviews(rev || []);
+        const responses = await Promise.all(requests);
+        if (responses.some((response) => !response.ok)) throw new Error('Product details are temporarily incomplete.');
+        const reviewPayload: unknown = await responses[0].json();
+        if (typeof reviewPayload !== 'object' || reviewPayload === null ||
+            !('reviews' in reviewPayload) || !Array.isArray(reviewPayload.reviews)) {
+          throw new Error('Review service returned invalid data.');
+        }
+        setReviews(reviewPayload.reviews as Review[]);
+        if (prod.category_id) {
+          const relatedPayload: unknown = await responses[1].json();
+          if (typeof relatedPayload !== 'object' || relatedPayload === null ||
+              !('products' in relatedPayload) || !Array.isArray(relatedPayload.products)) {
+            throw new Error('Related product catalog returned invalid data.');
+          }
+          setRelated(relatedPayload.products as Product[]);
+        }
+      } catch (error) {
+        console.error('Product detail load failed:', error instanceof Error ? error.message : 'Unknown error');
+        toast.error(error instanceof Error ? error.message : 'Product details are temporarily unavailable.');
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     fetchData();
   }, [addRecentlyViewed, slug]);

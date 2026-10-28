@@ -1,46 +1,79 @@
-# Razorpay setup for Chaudhary General Store
+# Neon, Prisma, and Razorpay setup
 
-The checkout now supports Cash on Delivery and Razorpay Standard Checkout. Online payments are created server-side, verified against Razorpay, and updated by a signed webhook.
+The application uses Neon PostgreSQL through Prisma for server-side persistence. Razorpay orders are created by the server, payment signatures are verified server-side, and signed webhooks are deduplicated before payment status changes.
 
-## 1. Apply the Supabase migration
+## 1. Configure Neon locally
 
-In Supabase Dashboard → SQL Editor, run the SQL from:
+Create a Neon PostgreSQL project and configure these private environment variables in `.env.local` (never commit the file):
 
-`supabase/migrations/20261028000000_add_razorpay_payment_fields.sql`
+- `DATABASE_URL` — Neon pooled connection string for the application runtime.
+- `DIRECT_URL` — Neon direct connection string for Prisma migrations.
+- `ADMIN_SESSION_SECRET`, `CUSTOMER_SESSION_SECRET`, and `ORDER_ACCESS_SECRET` — independent random secrets, each at least 32 characters.
+- `APP_BASE_URL` — canonical application URL.
 
-This adds Razorpay order/payment reference fields and allows `razorpay` as the payment method.
+Keep the connection strings private. Do not send credentials in chat or expose them through `NEXT_PUBLIC_` variables.
 
-## 2. Add Vercel environment variables
+## 2. Install, migrate, and optionally seed
 
-In Vercel → project → Settings → Environment Variables, add these server-side values for Production (and Preview if you test there):
+Run:
 
-- `RAZORPAY_KEY_ID` — Key ID from Razorpay
-- `RAZORPAY_KEY_SECRET` — Secret paired with that Key ID
-- `RAZORPAY_WEBHOOK_SECRET` — a separate secret you create when configuring the webhook
-- `SUPABASE_SERVICE_ROLE_KEY` — Supabase service-role key for this project
+```powershell
+npm ci
+npm run prisma:generate
+npx prisma validate
+npm run db:migrate:status
+```
 
-The project must already have `NEXT_PUBLIC_SUPABASE_URL` configured. The existing public anon key remains used by the browser client.
+For a **new, empty Neon database**, review the checked-in migration and then apply it with:
 
-**Never prefix any secret with `NEXT_PUBLIC_`. Never commit the service-role key, Razorpay secret, or webhook secret to GitHub.** If any secret was exposed, rotate it.
+```powershell
+npm run db:migrate:deploy
+```
 
-## 3. Configure Razorpay webhook
+Do not point the initial migration at an existing production database without a separately reviewed data migration and verified backup. No Supabase data is transferred by these commands.
 
-In Razorpay Dashboard → Account & Settings / Webhooks, add this URL:
+`npm run db:seed` imports the repository's existing local catalog seed only where matching rows are missing. Review `data/local-seed.json` before using it; it is sample/local catalog data, not a transfer of live Supabase business records. Verify the connection with `npm run db:verify`.
 
-`https://chaudhary-general-store-ecommerce.vercel.app/api/payments/webhook`
+Provision an administrator from a trusted local shell after setting `ADMIN_EMAIL`, `ADMIN_NAME`, and `ADMIN_INITIAL_PASSWORD` in the process environment:
 
-Subscribe to at least these events:
+```powershell
+npm run admin:provision
+```
+
+Use a unique password with at least 14 characters. The script stores only a bcrypt hash.
+
+## 3. Configure Razorpay
+
+Set these server-side environment variables in the local environment and the deployment platform:
+
+- `RAZORPAY_KEY_ID`
+- `RAZORPAY_KEY_SECRET`
+- `RAZORPAY_WEBHOOK_SECRET` — a separate secret configured on the Razorpay webhook.
+
+Never prefix a secret with `NEXT_PUBLIC_`. The browser receives only the public Key ID and the server-created Razorpay order ID. The server calculates totals from active database product prices and reserved inventory; the browser-submitted price is ignored.
+
+Configure the Razorpay webhook URL as:
+
+`https://<your-domain>/api/payments/webhook`
+
+Subscribe to:
 
 - `payment.captured`
-- `order.paid`
+- `payment.failed`
 
-Set a strong webhook secret and save the exact same value in Vercel as `RAZORPAY_WEBHOOK_SECRET`. This webhook secret is different from the Razorpay API Key Secret.
+The handler verifies the signature over the raw request body and records event IDs to make processing idempotent. A failed payment attempt does not mark the order paid or prevent another attempt; only a captured payment matching the stored order amount and currency is confirmed.
 
-## 4. Test before accepting real orders
+## 4. Product images and manual UPI screenshots
 
-1. First use Razorpay **Test Mode** credentials in a Preview/test deployment and test a successful payment plus a failed/cancelled payment.
-2. Confirm successful payment changes the order to `Payment Verified` / `paid` and `confirmed` in the order/admin views.
-3. After the tests pass, use Live Mode Key ID and Secret in Vercel Production, redeploy, and make a small real payment to verify the complete flow.
-4. Confirm automatic capture is enabled in Razorpay or verify the server capture flow is working. A payment is not marked paid until its status is captured.
+Set `BLOB_READ_WRITE_TOKEN` to enable authenticated admin product-image uploads to public Vercel Blob storage. Product images are public storefront assets.
 
-The customer-facing checkout does not need a payment screenshot or UTR for Razorpay payments. Existing COD orders and historical manual-UPI orders remain in the database.
+Manual UPI screenshots are validated and stored privately in the Neon database; retrieval requires the associated customer/order access or an authenticated admin session. Razorpay payments do not use screenshot submission.
+
+## 5. Validate before live payments
+
+1. Configure test-mode Razorpay credentials in a non-production environment.
+2. Test successful capture, failed attempts, cancellation, webhook retries, duplicate webhook delivery, and order status recovery.
+3. Confirm the deployment's webhook event configuration and that failed attempts never produce a paid order.
+4. Configure live credentials only after the test flow, database migration, catalog, administrator login, and storage have all been verified.
+
+The project has not been validated against a live Neon database or Razorpay account. Production readiness must not be inferred until the owner completes those external checks.

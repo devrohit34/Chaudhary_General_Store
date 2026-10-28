@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { supabase, Product, Category } from '@/lib/supabase';
+import type { Product, Category } from '@/lib/store-types';
 import { ProductCard } from '@/components/product-card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { ChevronRight, SlidersHorizontal } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Search } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -28,21 +29,37 @@ export default function ProductsPage() {
 
   useEffect(() => {
     async function fetchData() {
-      const [prodRes, catRes] = await Promise.all([
-        supabase.from('products').select('*').eq('is_active', true).order('created_at', { ascending: false }),
-        supabase.from('categories').select('*').order('sort_order'),
-      ]);
-      const allProducts = prodRes.data || [];
-      setProducts(allProducts);
-      setFiltered(allProducts);
-      setCategories(catRes.data || []);
-      const prices = allProducts.map((p) => p.price);
-      if (prices.length > 0) {
-        const max = Math.max(...prices);
-        setMaxPrice(max);
-        setPriceRange([0, max]);
+      try {
+        const [productResponse, categoryResponse] = await Promise.all([
+          fetch('/api/catalog/products?limit=100', { cache: 'no-store' }),
+          fetch('/api/catalog/categories', { cache: 'no-store' }),
+        ]);
+        if (!productResponse.ok || !categoryResponse.ok) throw new Error('The catalog is temporarily unavailable.');
+        const [productPayload, categoryPayload]: unknown[] = await Promise.all([
+          productResponse.json(),
+          categoryResponse.json(),
+        ]);
+        if (typeof productPayload !== 'object' || productPayload === null || !('products' in productPayload) ||
+            !Array.isArray(productPayload.products) || typeof categoryPayload !== 'object' ||
+            categoryPayload === null || !('categories' in categoryPayload) || !Array.isArray(categoryPayload.categories)) {
+          throw new Error('The catalog returned invalid data.');
+        }
+        const allProducts = productPayload.products as Product[];
+        setProducts(allProducts);
+        setFiltered(allProducts);
+        setCategories(categoryPayload.categories as Category[]);
+        const prices = allProducts.map((p) => p.price);
+        if (prices.length > 0) {
+          const max = Math.max(...prices);
+          setMaxPrice(max);
+          setPriceRange([0, max]);
+        }
+      } catch (error) {
+        console.error('Catalog load failed:', error instanceof Error ? error.message : 'Unknown error');
+        toast.error(error instanceof Error ? error.message : 'The catalog is temporarily unavailable.');
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     }
     fetchData();
   }, []);

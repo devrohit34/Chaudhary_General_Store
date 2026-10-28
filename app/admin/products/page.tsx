@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { supabase, Product, Category } from '@/lib/supabase';
+import type { Product, Category } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,14 +32,33 @@ export default function AdminProductsPage() {
 
   useEffect(() => {
     fetchProducts();
-    supabase.from('categories').select('*').order('sort_order').then(({ data }) => setCategories(data || []));
   }, []);
 
   async function fetchProducts() {
     setLoading(true);
-    const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false });
-    setProducts(data || []);
-    setLoading(false);
+    try {
+      const [productsResponse, categoriesResponse] = await Promise.all([
+        fetch('/api/admin/products', { cache: 'no-store' }),
+        fetch('/api/admin/categories', { cache: 'no-store' }),
+      ]);
+      if (!productsResponse.ok || !categoriesResponse.ok) throw new Error('Admin catalog is temporarily unavailable.');
+      const [productsPayload, categoriesPayload]: unknown[] = await Promise.all([
+        productsResponse.json(),
+        categoriesResponse.json(),
+      ]);
+      if (typeof productsPayload !== 'object' || productsPayload === null || !('products' in productsPayload) ||
+          !Array.isArray(productsPayload.products) || typeof categoriesPayload !== 'object' ||
+          categoriesPayload === null || !('categories' in categoriesPayload) || !Array.isArray(categoriesPayload.categories)) {
+        throw new Error('Admin catalog returned invalid data.');
+      }
+      setProducts(productsPayload.products as Product[]);
+      setCategories(categoriesPayload.categories as Category[]);
+    } catch (error) {
+      console.error('Admin catalog load failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Admin catalog is temporarily unavailable.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   const filtered = products.filter((p) =>
@@ -91,23 +110,27 @@ export default function AdminProductsPage() {
 
     try {
       const compressedFile = await compressImage(file);
-      const fileExt = compressedFile.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
-      const filePath = `products/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('product-images')
-        .upload(filePath, compressedFile, { cacheControl: '3600', upsert: false });
-
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(filePath);
-      setForm((current) => ({ ...current, image_url: urlData.publicUrl }));
+      const formData = new FormData();
+      formData.set('file', compressedFile);
+      const response = await fetch('/api/admin/product-images', { method: 'POST', body: formData });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string'
+          ? payload.error : 'Image upload failed.';
+        throw new Error(message);
+      }
+      if (typeof payload !== 'object' || payload === null || !('url' in payload) || typeof payload.url !== 'string') {
+        throw new Error('Image service returned invalid data.');
+      }
+      const imageUrl = payload.url;
+      setForm((current) => ({ ...current, image_url: imageUrl }));
       toast.success('Image uploaded successfully');
-    } catch {
-      toast.error('Failed to upload image');
+    } catch (error) {
+      console.error('Product image upload failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to upload image');
+    } finally {
+      setUploading(false);
     }
-    setUploading(false);
   }, []);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
@@ -211,28 +234,43 @@ export default function AdminProductsPage() {
     };
 
     try {
+      const response = await fetch(editing ? `/api/admin/products/${encodeURIComponent(editing.id)}` : '/api/admin/products', {
+        method: editing ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const result: unknown = await response.json().catch(() => null);
+        const message = typeof result === 'object' && result !== null && 'error' in result && typeof result.error === 'string'
+          ? result.error : 'Product could not be saved.';
+        throw new Error(message);
+      }
       if (editing) {
-        const { error } = await supabase.from('products').update(payload).eq('id', editing.id);
-        if (error) throw error;
         toast.success('Product updated successfully');
       } else {
-        const { error } = await supabase.from('products').insert(payload);
-        if (error) throw error;
         toast.success('Product added successfully');
       }
       setDialogOpen(false);
-      fetchProducts();
-    } catch {
-      toast.error('Failed to save product');
+      await fetchProducts();
+    } catch (error) {
+      console.error('Product save failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to save product');
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const remove = async (id: string) => {
     if (!confirm('Delete this product?')) return;
-    const { error } = await supabase.from('products').delete().eq('id', id);
-    if (error) toast.error('Failed to delete');
-    else { toast.success('Product deleted'); fetchProducts(); }
+    try {
+      const response = await fetch(`/api/admin/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Product could not be deleted.');
+      toast.success('Product deleted');
+      await fetchProducts();
+    } catch (error) {
+      console.error('Product delete failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete');
+    }
   };
 
   return (

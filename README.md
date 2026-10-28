@@ -1,178 +1,52 @@
-# E-Commerce-website
+# Chaudhary General Store Ecommerce
 
-# 🛒 Chaudhary General Store – Grocery E-commerce Platform
+The existing Chaudhary General Store shopping application is built with Next.js App Router, React, TypeScript, and Tailwind CSS. Its customer-facing layout and product browsing experience are preserved while database operations are moved behind server-side Prisma APIs.
 
-A modern full-stack grocery e-commerce platform for **Chaudhary General Store**, designed to provide a seamless online shopping experience. Customers can browse products, place orders, make UPI payments, and track their orders, while administrators can efficiently manage inventory, customers, and sales through a dedicated admin dashboard.
+## Features
 
-## 🌐 Live Demo
+- Product catalog, categories, search, product detail, and local wishlist/cart.
+- Checkout with server-calculated totals, stock reservation, COD, and Razorpay.
+- Customer accounts, order history, guest order tracking, and private manual-UPI screenshot submission.
+- Admin tools for catalog, inventory, orders, customer lookup, manual-UPI review, payments, and reporting.
+- Server-authorized database access; no browser-side Supabase client.
 
-👉 **Chaudhary General Store (Live Website)**
+## Stack
 
-https://chaudhary-general-store-ecommerce.vercel.app/
+- Next.js 13.5.11 and React 18
+- TypeScript and Tailwind CSS
+- Neon PostgreSQL with Prisma 7 and the Neon serverless adapter
+- Razorpay Standard Checkout and signed webhooks
+- Vercel Blob for administrator-uploaded public product images
 
-## ✨ Features
+## Local setup
 
-### 👤 Customer Features
-- User Registration & Login
-- Product Categories & Search
-- Product Details
-- Shopping Cart
-- Wishlist
-- Secure Checkout
-- UPI Payment
-- Cash on Delivery (COD)
-- Order Tracking
-- Order History
-- User Profile
-- Multiple Delivery Addresses
-- Responsive Design
+Use Node.js 20.19 or newer. Install dependencies:
 
-### 🛠️ Admin Features
-- Secure Admin Login
-- Dashboard Analytics
-- Product Management (Add/Edit/Delete)
-- Category Management
-- Inventory & Stock Management
-- Order Management
-- Customer Management
-- Banner Management
-- Sales Reports
-- Low Stock Alerts
-
----
-
-## 🛒 Product Categories
-
-- Rice & Grains
-- Atta & Flour
-- Pulses (Dal)
-- Cooking Oil
-- Sugar & Salt
-- Biscuits
-- Chocolates
-- Namkeen
-- Noodles & Pasta
-- Dairy Products
-- Cold Drinks
-- Water Bottles
-- Soaps & Shampoos
-- Household Essentials
-- Daily Grocery Items
-
----
-
-## 🚀 Technology Stack
-
-### Frontend
-- React.js
-- TypeScript
-- Tailwind CSS
-- Vite
-
-### Backend
-- Node.js
-- Express.js
-
-### Database
-- PostgreSQL
-
-### Authentication
-- Firebase Authentication (OTP)
-- Google Login
-
-### Payments
-- UPI Payment
-- QR Code Payment
-- Cash on Delivery (COD)
-
-### Deployment
-- Vercel (Frontend)
-- Render / Railway (Backend)
-
----
-
-## 📂 Project Structure
-
-```text
-chaudhary-general-store-ecommerce/
-│
-├── client/                 # Customer Website
-├── admin/                  # Admin Dashboard
-├── server/                 # Backend APIs
-├── database/               # Database Schema
-├── public/
-├── src/
-├── package.json
-└── README.md
+```powershell
+npm ci
 ```
 
----
+Configure the private variables in `.env.local` using safe local editing; do not overwrite an existing environment file. Required Neon URLs, independent session secrets, optional Razorpay credentials, and Blob configuration are described in [RAZORPAY_SETUP.md](./RAZORPAY_SETUP.md) and `.env.example`.
 
-### Install Dependencies
+For a new, empty Neon database, validate and apply the checked-in migration:
 
-```bash
-npm install
+```powershell
+npm run prisma:generate
+npx prisma validate
+npm run db:migrate:deploy
+npm run db:verify
 ```
 
-### Run Development Server
+`npm run db:seed` imports the repository's existing local/sample catalog where rows are missing. It is not a production Supabase data transfer. Do not apply the initial migration to a populated production database without a separately reviewed migration and backup.
 
-```bash
+Start the application:
+
+```powershell
 npm run dev
 ```
 
-### Build Project
+Other useful checks are `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build`. Provision an administrator as described in [RAZORPAY_SETUP.md](./RAZORPAY_SETUP.md).
 
-```bash
-npm run build
-```
+## Migration status
 
----
-
-## 📸 Screenshots
-
-- Home Page
-- Product Listing
-- Product Details
-- Shopping Cart
-- Checkout Page
-- Order Tracking
-- Admin Dashboard
-
-(Add screenshots here)
-
----
-
-## 🔮 Future Enhancements
-
-- AI Product Recommendations
-- Voice Search
-- Loyalty Rewards
-- Referral Program
-- Push Notifications
-- Mobile Application
-- Delivery Partner App
-- Multi-language Support
-
----
-
-## 👨‍💻 Developed By  **Rohit Kumar**
-
-    Owner : **Kundan Kumar** 
-
-📧 Email: kkc8014@gmail.com
-
-📱 Mobile: +91 8051806325
-
-🏠 Store: **चौधरी जेनरल स्टोर**
-
-📍 Shambhupur Koari, Darbar Tola, Pani Tanki, Bhagwanpur, Vaishali, Bihar – 844114, India
-
----
-
-## 📄 License
-
-This project is developed for **Chaudhary General Store** for educational and commercial purposes.
-
----
-
-⭐ If you like this project, don't forget to **Star** this repository!
+No live database has been migrated, no production data has been transferred, and Razorpay/Neon/Blob have not been validated against owner credentials. Historical `supabase/migrations` are retained only as reference and must not be applied to Neon. See [NEON_MIGRATION_AUDIT.md](./NEON_MIGRATION_AUDIT.md) for boundaries and required owner actions.

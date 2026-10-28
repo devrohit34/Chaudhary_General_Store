@@ -4,7 +4,7 @@ import Image from 'next/image';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { supabase, Order } from '@/lib/supabase';
+import type { Order } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -42,13 +42,25 @@ export default function OrderDetailPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchOrder = useCallback(async () => {
-    const { data: ord } = await supabase.from('orders').select('*').eq('order_number', orderNumber).single();
-    if (ord) {
-      const { data: items } = await supabase.from('order_items').select('*').eq('order_id', ord.id);
-      setOrder({ ...ord, order_items: items || [] });
+    try {
+      const response = await fetch(`/api/orders/${encodeURIComponent(orderNumber)}`, { cache: 'no-store' });
+      if (!response.ok) {
+        setOrder(null);
+        return;
+      }
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('order' in payload)) {
+        throw new Error('Order service returned invalid data.');
+      }
+      const ord = payload.order as Order;
+      setOrder(ord);
       if (ord.utr_number) setUtrNumber(ord.utr_number);
+    } catch (error) {
+      console.error('Order lookup failed:', error instanceof Error ? error.message : 'Unknown error');
+      setOrder(null);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [orderNumber]);
 
   useEffect(() => {
@@ -95,31 +107,25 @@ export default function OrderDetailPage() {
 
     setUploading(true);
     try {
-      const fileName = `${order.order_number}-${Date.now()}.${screenshotFile.name.split('.').pop()}`;
-      const { error: uploadError } = await supabase.storage
-        .from('payment-screenshots')
-        .upload(fileName, screenshotFile, { cacheControl: '3600', upsert: false });
-
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage.from('payment-screenshots').getPublicUrl(fileName);
-      const screenshotUrl = urlData.publicUrl;
-
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update({
-          utr_number: utrNumber.trim(),
-          payment_screenshot_url: screenshotUrl,
-          payment_status: 'pending_verification',
-        })
-        .eq('id', order.id);
-
-      if (updateError) throw updateError;
+      const formData = new FormData();
+      formData.set('utrNumber', utrNumber.trim());
+      formData.set('screenshot', screenshotFile);
+      const response = await fetch(`/api/orders/${encodeURIComponent(order.order_number)}/payment-details`, {
+        method: 'POST',
+        body: formData,
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = typeof payload === 'object' && payload !== null && 'error' in payload &&
+          typeof payload.error === 'string' ? payload.error : 'Payment details could not be submitted.';
+        throw new Error(message);
+      }
 
       toast.success('Payment details submitted. Store will verify shortly.');
-      fetchOrder();
+      await fetchOrder();
     } catch (err) {
-      toast.error('Failed to submit payment details. Please try again.');
+      console.error('Payment details submission failed:', err instanceof Error ? err.message : 'Unknown error');
+      toast.error(err instanceof Error ? err.message : 'Failed to submit payment details. Please try again.');
     }
     setUploading(false);
   };
@@ -251,7 +257,6 @@ export default function OrderDetailPage() {
                 <>
                   {/* Dynamic QR Code */}
                   <UpiDynamicQr
-                    orderId={order.id}
                     orderNumber={order.order_number}
                     amount={order.total_amount}
                     qrCreatedAt={order.qr_created_at ?? order.created_at}
@@ -327,6 +332,7 @@ export default function OrderDetailPage() {
                     alt="Payment Screenshot"
                     width={320}
                     height={240}
+                    unoptimized
                     className="max-h-48 rounded-lg border"
                   />
                 </div>

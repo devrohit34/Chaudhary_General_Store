@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { supabase, Order } from '@/lib/supabase';
+import type { Order } from '@/lib/store-types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -13,6 +13,26 @@ import {
   LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip,
   CartesianGrid, BarChart, Bar,
 } from 'recharts';
+import { toast } from 'sonner';
+
+type RevenuePoint = { day: string; revenue: number };
+type OrderStatusPoint = { status: string; count: number };
+type DashboardPayload = {
+  stats: {
+    products: number;
+    totalOrders: number;
+    todayOrders: number;
+    pendingOrders: number;
+    completedOrders: number;
+    revenue: number;
+    todayRevenue: number;
+    customers: number;
+    lowStock: number;
+  };
+  recentOrders: Order[];
+  revenueData: RevenuePoint[];
+  orderStatusData: OrderStatusPoint[];
+};
 
 export default function AdminPage() {
   const [stats, setStats] = useState({
@@ -27,66 +47,33 @@ export default function AdminPage() {
     lowStock: 0,
   });
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
-  const [revenueData, setRevenueData] = useState<any[]>([]);
-  const [orderStatusData, setOrderStatusData] = useState<any[]>([]);
+  const [revenueData, setRevenueData] = useState<RevenuePoint[]>([]);
+  const [orderStatusData, setOrderStatusData] = useState<OrderStatusPoint[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchData() {
-      const today = new Date().toDateString();
-
-      const [prodRes, ordRes, customerRes, lowStockRes] = await Promise.all([
-        supabase.from('products').select('id', { count: 'exact', head: true }),
-        supabase.from('orders').select('*').order('created_at', { ascending: false }),
-        supabase.from('user_profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('products').select('id', { count: 'exact', head: true }).lt('stock_quantity', 10),
-      ]);
-
-      const allOrders: Order[] = ordRes.data || [];
-      const todayOrders = allOrders.filter((o) => new Date(o.created_at).toDateString() === today);
-      const pendingOrders = allOrders.filter((o) => ['pending', 'confirmed', 'processing'].includes(o.status));
-      const completedOrders = allOrders.filter((o) => o.status === 'delivered');
-      const revenue = allOrders.reduce((s, o) => s + Number(o.total_amount), 0);
-      const todayRevenue = todayOrders.reduce((s, o) => s + Number(o.total_amount), 0);
-
-      setStats({
-        products: prodRes.count || 0,
-        totalOrders: allOrders.length,
-        todayOrders: todayOrders.length,
-        pendingOrders: pendingOrders.length,
-        completedOrders: completedOrders.length,
-        revenue,
-        todayRevenue,
-        customers: customerRes.count || 0,
-        lowStock: lowStockRes.count || 0,
-      });
-
-      setRecentOrders(allOrders.slice(0, 6));
-
-      const days: any[] = [];
-      for (let i = 13; i >= 0; i--) {
-        const date = new Date();
-        date.setDate(date.getDate() - i);
-        const label = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-        const dayRevenue = allOrders
-          .filter((o) => new Date(o.created_at).toDateString() === date.toDateString())
-          .reduce((s, o) => s + Number(o.total_amount), 0);
-        days.push({ day: label, revenue: dayRevenue });
+      try {
+        const response = await fetch('/api/admin/dashboard', { cache: 'no-store' });
+        if (!response.ok) throw new Error('Dashboard data is temporarily unavailable.');
+        const payload: unknown = await response.json();
+        if (typeof payload !== 'object' || payload === null || !('stats' in payload) ||
+            !('recentOrders' in payload) || !Array.isArray(payload.recentOrders) ||
+            !('revenueData' in payload) || !Array.isArray(payload.revenueData) ||
+            !('orderStatusData' in payload) || !Array.isArray(payload.orderStatusData)) {
+          throw new Error('Dashboard service returned invalid data.');
+        }
+        const result = payload as DashboardPayload;
+        setStats(result.stats);
+        setRecentOrders(result.recentOrders);
+        setRevenueData(result.revenueData);
+        setOrderStatusData(result.orderStatusData);
+      } catch (error) {
+        console.error('Admin dashboard load failed:', error instanceof Error ? error.message : 'Unknown error');
+        toast.error(error instanceof Error ? error.message : 'Dashboard data is temporarily unavailable.');
+      } finally {
+        setLoading(false);
       }
-      setRevenueData(days);
-
-      const statusCounts: Record<string, number> = {};
-      allOrders.forEach((o) => {
-        statusCounts[o.status] = (statusCounts[o.status] || 0) + 1;
-      });
-      setOrderStatusData(
-        Object.entries(statusCounts).map(([status, count]) => ({
-          status: status.replace(/_/g, ' '),
-          count,
-        }))
-      );
-
-      setLoading(false);
     }
     fetchData();
   }, []);

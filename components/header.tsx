@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useTheme } from 'next-themes';
-import { supabase, Product } from '@/lib/supabase';
+import type { Product } from '@/lib/store-types';
 
 const navLinks = [
   { href: '/', label: 'Home' },
@@ -40,12 +40,18 @@ export function Header() {
       return;
     }
     const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from('products')
-        .select('*')
-        .or(`name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%,tags.cs.{${searchQuery}}`)
-        .limit(5);
-      if (data) setSuggestions(data);
+      try {
+        const response = await fetch(`/api/catalog/products?search=${encodeURIComponent(searchQuery)}&limit=5`, { cache: 'no-store' });
+        if (!response.ok) throw new Error('Search suggestions are temporarily unavailable.');
+        const payload: unknown = await response.json();
+        if (typeof payload !== 'object' || payload === null || !('products' in payload) || !Array.isArray(payload.products)) {
+          throw new Error('Product catalog returned invalid data.');
+        }
+        setSuggestions(payload.products as Product[]);
+      } catch (error) {
+        console.error('Search suggestions failed:', error instanceof Error ? error.message : 'Unknown error');
+        setSuggestions([]);
+      }
     }, 200);
     return () => clearTimeout(timer);
   }, [searchQuery]);

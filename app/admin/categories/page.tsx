@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase, Category } from '@/lib/supabase';
+import type { Category } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,8 +18,18 @@ export default function AdminCategoriesPage() {
   useEffect(() => { fetchCategories(); }, []);
 
   async function fetchCategories() {
-    const { data } = await supabase.from('categories').select('*').order('sort_order');
-    setCategories(data || []);
+    try {
+      const response = await fetch('/api/admin/categories', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Categories could not be loaded.');
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('categories' in payload) || !Array.isArray(payload.categories)) {
+        throw new Error('Category service returned invalid data.');
+      }
+      setCategories(payload.categories as Category[]);
+    } catch (error) {
+      console.error('Admin category load failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Categories could not be loaded.');
+    }
   }
 
   const openAdd = () => {
@@ -35,22 +45,35 @@ export default function AdminCategoriesPage() {
   };
 
   const save = async () => {
-    const payload = { ...form, slug: form.slug || form.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') };
-    if (editing) {
-      const { error } = await supabase.from('categories').update(payload).eq('id', editing.id);
-      if (error) toast.error('Failed'); else toast.success('Category updated');
-    } else {
-      const { error } = await supabase.from('categories').insert(payload);
-      if (error) toast.error('Failed'); else toast.success('Category added');
+    const generatedSlug = form.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const payload = { ...form, slug: form.slug || generatedSlug };
+    try {
+      const response = await fetch(editing ? `/api/admin/categories/${encodeURIComponent(editing.id)}` : '/api/admin/categories', {
+        method: editing ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error('Category could not be saved.');
+      toast.success(editing ? 'Category updated' : 'Category added');
+      setDialogOpen(false);
+      await fetchCategories();
+    } catch (error) {
+      console.error('Admin category save failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed');
     }
-    setDialogOpen(false);
-    fetchCategories();
   };
 
   const remove = async (id: string) => {
     if (!confirm('Delete this category?')) return;
-    const { error } = await supabase.from('categories').delete().eq('id', id);
-    if (error) toast.error('Failed'); else { toast.success('Deleted'); fetchCategories(); }
+    try {
+      const response = await fetch(`/api/admin/categories/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Category could not be deleted.');
+      toast.success('Deleted');
+      await fetchCategories();
+    } catch (error) {
+      console.error('Admin category delete failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed');
+    }
   };
 
   return (

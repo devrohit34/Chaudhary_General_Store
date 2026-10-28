@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase, Coupon } from '@/lib/supabase';
+import type { Coupon } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,8 +19,18 @@ export default function AdminCouponsPage() {
   useEffect(() => { fetchCoupons(); }, []);
 
   async function fetchCoupons() {
-    const { data } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
-    setCoupons(data || []);
+    try {
+      const response = await fetch('/api/admin/coupons', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Coupons could not be loaded.');
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null || !('coupons' in payload) || !Array.isArray(payload.coupons)) {
+        throw new Error('Coupon service returned invalid data.');
+      }
+      setCoupons(payload.coupons as Coupon[]);
+    } catch (error) {
+      console.error('Admin coupon list failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Coupons could not be loaded.');
+    }
   }
 
   const save = async () => {
@@ -33,15 +43,34 @@ export default function AdminCouponsPage() {
       max_discount: form.max_discount ? Number(form.max_discount) : null,
       is_active: true,
     };
-    const { error } = await supabase.from('coupons').insert(payload);
-    if (error) toast.error('Failed to add coupon');
-    else { toast.success('Coupon added'); setDialogOpen(false); fetchCoupons(); setForm({ code: '', description: '', discount_type: 'percent', discount_value: '', min_order_amount: '', max_discount: '' }); }
+    try {
+      const response = await fetch('/api/admin/coupons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error('Coupon could not be added.');
+      toast.success('Coupon added');
+      setDialogOpen(false);
+      await fetchCoupons();
+      setForm({ code: '', description: '', discount_type: 'percent', discount_value: '', min_order_amount: '', max_discount: '' });
+    } catch (error) {
+      console.error('Admin coupon create failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed to add coupon');
+    }
   };
 
   const remove = async (id: string) => {
     if (!confirm('Delete this coupon?')) return;
-    const { error } = await supabase.from('coupons').delete().eq('id', id);
-    if (error) toast.error('Failed'); else { toast.success('Deleted'); fetchCoupons(); }
+    try {
+      const response = await fetch(`/api/admin/coupons/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('Coupon could not be deleted.');
+      toast.success('Deleted');
+      await fetchCoupons();
+    } catch (error) {
+      console.error('Admin coupon delete failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Failed');
+    }
   };
 
   return (
