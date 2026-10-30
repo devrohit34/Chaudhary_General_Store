@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getPrisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/require-admin';
 import { toOrderDto } from '@/lib/prisma-dto';
+import { cancelOrder, OrderCancellationError, processRefundOperation } from '@/lib/order-cancellation';
 
 const orderStatuses = ['pending', 'confirmed', 'processing', 'out_for_delivery', 'delivered', 'cancelled', 'returned'] as const;
 const patchSchema = z.object({
@@ -22,7 +23,10 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const order = await getPrisma().order.findUnique({ where: { id }, include: { items: true } });
+    const order = await getPrisma().order.findUnique({
+      where: { id },
+      include: { items: true, refundOperation: true },
+    });
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
     return NextResponse.json({ order: toOrderDto(order) });
   } catch (error) {
@@ -46,6 +50,28 @@ export async function PATCH(
     const current = await prisma.order.findUnique({ where: { id }, include: { payments: true } });
     if (!current) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
     const update = parsed.data;
+    if (update.status === 'cancelled') {
+      if (update.payment_status !== undefined) {
+        return NextResponse.json({ error: 'Cancellation and payment review must be performed separately.' }, { status: 400 });
+      }
+      const cancellation = await cancelOrder(id, `admin:${auth.session?.email ?? 'admin'}`, 'Cancelled by administrator');
+      if (cancellation.refundOperationId && cancellation.refundStatus === 'pending') {
+        try {
+          await processRefundOperation(cancellation.refundOperationId);
+        } catch (error) {
+          console.error('Refund processing could not be completed:', error instanceof Error ? error.message : 'Unknown error');
+        }
+      }
+      const cancelled = await prisma.order.findUnique({
+        where: { id },
+        include: { items: true, refundOperation: true },
+      });
+      if (!cancelled) throw new Error('Cancelled order could not be reloaded.');
+      return NextResponse.json({ order: toOrderDto(cancelled) });
+    }
+    if (current.status === 'cancelled' && (update.status !== undefined || update.payment_status !== undefined)) {
+      return NextResponse.json({ error: 'Cancelled orders cannot be reactivated or payment-reviewed here.' }, { status: 409 });
+    }
     if (update.payment_status !== undefined) {
       const manualUpi = ['upi', 'phonepe', 'googlepay', 'paytm'].includes(current.paymentMethod);
       if (!manualUpi || current.paymentStatus !== 'pending_verification') {
@@ -54,8 +80,8 @@ export async function PATCH(
     }
 
     const saved = await prisma.$transaction(async (transaction) => {
-      const order = await transaction.order.update({
-        where: { id },
+      const changed = await transaction.order.updateMany({
+        where: { id, status: current.status, paymentStatus: current.paymentStatus },
         data: {
           ...(update.status ? { status: update.status } : {}),
           ...(update.status === 'delivered' ? { deliveredAt: new Date() } : {}),
@@ -64,7 +90,7 @@ export async function PATCH(
               paymentStatus: 'paid',
               upiVerifiedAt: new Date(),
               upiRejectedReason: null,
-              ...(!update.status ? { status: 'confirmed' } : {}),
+              ...(!update.status && current.status === 'pending' ? { status: 'confirmed' } : {}),
             }
             : {}),
           ...(update.payment_status === 'rejected'
@@ -74,18 +100,26 @@ export async function PATCH(
             }
             : {}),
         },
-        include: { items: true },
       });
+      if (changed.count !== 1) throw new Error('Order changed before the update completed.');
       if (update.payment_status === 'paid' || update.payment_status === 'rejected') {
         await transaction.payment.updateMany({
           where: { orderId: id, gateway: 'manual_upi', status: 'pending' },
           data: { status: update.payment_status === 'paid' ? 'paid' : 'rejected', verifiedAt: update.payment_status === 'paid' ? new Date() : null },
         });
       }
+      const order = await transaction.order.findUnique({
+        where: { id },
+        include: { items: true, refundOperation: true },
+      });
+      if (!order) throw new Error('Updated order could not be reloaded.');
       return order;
     });
     return NextResponse.json({ order: toOrderDto(saved) });
   } catch (error) {
+    if (error instanceof OrderCancellationError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error('Admin order update failed:', error instanceof Error ? error.message : 'Unknown error');
     return NextResponse.json({ error: 'Order could not be updated.' }, { status: 503 });
   }

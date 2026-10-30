@@ -59,6 +59,7 @@ export function Footer() {
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li><Link href="/about" className="hover:text-primary">About Us</Link></li>
               <li><Link href="/contact" className="hover:text-primary">Contact Us</Link></li>
+              <li><Link href="/cancellation-refunds" className="hover:text-primary">Cancellation & Refunds</Link></li>
               <li><Link href="/account" className="hover:text-primary">My Account</Link></li>
               <li><Link href="/orders" className="hover:text-primary">My Orders</Link></li>
             </ul>

@@ -147,6 +147,44 @@ export default function AdminOrdersPage() {
     finally { setProcessing(false); }
   };
 
+  const processOrReconcileRefund = async (order: OrderWithItems, action?: 'process' | 'reconcile' | 'retry') => {
+    const operation = action ?? (order.refund_status === 'pending' ? 'process' : 'reconcile');
+    if (operation === 'retry' && !window.confirm('Confirm you checked Razorpay and no refund exists for this payment. The server will check again before retrying.')) {
+      return;
+    }
+    setProcessing(true);
+    try {
+      const response = await fetch(`/api/admin/orders/${encodeURIComponent(order.id)}/refund`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: operation,
+          ...(operation === 'retry' ? { confirmNoProviderRefund: true } : {}),
+        }),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = typeof payload === 'object' && payload !== null && 'error' in payload &&
+          typeof payload.error === 'string' ? payload.error : 'Refund status could not be updated.';
+        throw new Error(message);
+      }
+      const refundStatus = typeof payload === 'object' && payload !== null && 'refundStatus' in payload &&
+        typeof payload.refundStatus === 'string' ? payload.refundStatus : order.refund_status;
+      const refundReference = typeof payload === 'object' && payload !== null && 'refundReference' in payload &&
+        typeof payload.refundReference === 'string' ? payload.refundReference : order.refund_reference;
+      setSelectedOrder((selected) => selected?.id === order.id
+        ? { ...selected, refund_status: refundStatus, refund_reference: refundReference }
+        : selected);
+      toast.success(operation === 'process' ? 'Refund processing was started.' : operation === 'retry' ? 'Refund retry was submitted.' : 'Refund status was reconciled.');
+      await fetchOrders();
+    } catch (error) {
+      console.error('Refund operation action failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Refund status could not be updated.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const openOrderDetails = async (order: OrderWithItems) => {
     setSelectedOrder(order);
     setDetailsOpen(true);
@@ -186,6 +224,7 @@ export default function AdminOrdersPage() {
     outForDelivery: orders.filter(o => o.status === 'out_for_delivery').length,
     delivered: orders.filter(o => o.status === 'delivered').length,
     pendingVerification: orders.filter(o => o.payment_status === 'pending_verification' && o.utr_number).length,
+    refundsNeedReview: orders.filter(o => ['failed', 'requires_review'].includes(o.refund_status)).length,
   };
 
   return (
@@ -196,7 +235,7 @@ export default function AdminOrdersPage() {
       </div>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 mb-6">
         {[
           { label: 'Total Orders', value: summaryStats.total, icon: ShoppingCart, color: 'bg-gray-100 text-gray-600' },
           { label: 'Pending', value: summaryStats.pending, icon: Clock, color: 'bg-yellow-100 text-yellow-600' },
@@ -204,6 +243,7 @@ export default function AdminOrdersPage() {
           { label: 'Out for Delivery', value: summaryStats.outForDelivery, icon: Truck, color: 'bg-orange-100 text-orange-600' },
           { label: 'Delivered', value: summaryStats.delivered, icon: CheckCircle, color: 'bg-green-100 text-green-600' },
           { label: 'Needs Verification', value: summaryStats.pendingVerification, icon: AlertCircle, color: 'bg-blue-100 text-blue-600' },
+          { label: 'Refunds to Review', value: summaryStats.refundsNeedReview, icon: AlertCircle, color: 'bg-amber-100 text-amber-600' },
         ].map((stat) => (
           <div key={stat.label} className="bg-white rounded-xl border p-4 shadow-sm">
             <div className="flex items-center gap-3">
@@ -344,6 +384,11 @@ export default function AdminOrdersPage() {
                             <Badge className={`${paymentConfig.color} text-xs`}>
                               {paymentConfig.label}
                             </Badge>
+                            {order.refund_status !== 'not_applicable' && (
+                              <Badge variant="outline" className="text-xs capitalize">
+                                Refund: {order.refund_status.replace(/_/g, ' ')}
+                              </Badge>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-4">
@@ -503,6 +548,14 @@ export default function AdminOrdersPage() {
                     {selectedOrder.payment_method}
                   </Badge>
                 </div>
+                {selectedOrder.status === 'cancelled' && (
+                  <div className="rounded-lg border bg-gray-50 p-4 space-y-1 text-sm">
+                    <p className="font-medium">Cancelled{selectedOrder.cancelled_at ? ` on ${new Date(selectedOrder.cancelled_at).toLocaleString('en-IN')}` : ''}</p>
+                    {selectedOrder.cancellation_reason && <p className="text-gray-600">Reason: {selectedOrder.cancellation_reason}</p>}
+                    <p className="text-gray-600">Refund status: {selectedOrder.refund_status.replace(/_/g, ' ')}</p>
+                    {selectedOrder.refund_reference && <p className="text-xs text-gray-500">Razorpay reference: {selectedOrder.refund_reference}</p>}
+                  </div>
+                )}
 
                 <Tabs defaultValue="customer" className="w-full">
                   <TabsList className="grid w-full grid-cols-4">
@@ -629,6 +682,47 @@ export default function AdminOrdersPage() {
                         <span className="text-gray-500">Payment Method</span>
                         <Badge variant="outline" className="uppercase">{selectedOrder.payment_method}</Badge>
                       </div>
+                      {selectedOrder.status === 'cancelled' && (
+                        <div className="border-t pt-4 space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-gray-500">Refund Status</span>
+                            <Badge variant="outline" className="capitalize">{selectedOrder.refund_status.replace(/_/g, ' ')}</Badge>
+                          </div>
+                          {selectedOrder.refund_reference && (
+                            <p className="text-xs text-gray-500 break-all">Refund reference: {selectedOrder.refund_reference}</p>
+                          )}
+                          {['pending', 'processing', 'failed', 'requires_review'].includes(selectedOrder.refund_status) &&
+                            selectedOrder.refund_gateway === 'razorpay' && selectedOrder.refund_can_reconcile && (
+                              <Button
+                                variant="outline"
+                                className="w-full"
+                                onClick={() => processOrReconcileRefund(selectedOrder)}
+                                disabled={processing}
+                              >
+                                {processing && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                                {selectedOrder.refund_status === 'pending' ? 'Process Refund' : 'Reconcile Refund'}
+                              </Button>
+                          )}
+                          {['failed', 'requires_review'].includes(selectedOrder.refund_status) &&
+                            selectedOrder.refund_gateway === 'razorpay' && selectedOrder.refund_can_reconcile &&
+                            !selectedOrder.refund_reference && (
+                              <Button
+                                variant="outline"
+                                className="w-full"
+                                onClick={() => processOrReconcileRefund(selectedOrder, 'retry')}
+                                disabled={processing}
+                              >
+                                Retry after checking Razorpay
+                              </Button>
+                          )}
+                          {selectedOrder.refund_status === 'requires_review' &&
+                            (selectedOrder.refund_gateway === 'manual' || !selectedOrder.refund_can_reconcile) && (
+                              <p className="text-sm text-amber-700">
+                                A verified payment-provider reference is not available. Review the payment manually before taking action.
+                              </p>
+                          )}
+                        </div>
+                      )}
 
                       {isUpiOrder(selectedOrder) && (
                         <>
@@ -729,6 +823,7 @@ export default function AdminOrdersPage() {
                           { status: 'processing', label: 'Order Packed', time: ['processing', 'out_for_delivery', 'delivered'].includes(selectedOrder.status) ? selectedOrder.updated_at : null, icon: Package },
                           { status: 'out_for_delivery', label: 'Out for Delivery', time: ['out_for_delivery', 'delivered'].includes(selectedOrder.status) ? selectedOrder.updated_at : null, icon: Truck },
                           { status: 'delivered', label: 'Delivered', time: selectedOrder.delivered_at, icon: CheckCircle },
+                          { status: 'cancelled', label: 'Order Cancelled', time: selectedOrder.cancelled_at, icon: XCircle },
                         ].map((step, index) => {
                           const isActive = step.time !== null;
                           const StepIcon = step.icon;

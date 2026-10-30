@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getPrisma } from '@/lib/prisma';
 import { getRazorpayConfig, razorpayAuth, safeEqualHex } from '@/lib/razorpay-server';
 import { hasSameOrigin } from '@/lib/request-security';
+import { prepareRefundForCapturedPayment, processRefundOperation } from '@/lib/order-cancellation';
 
 export const runtime = 'nodejs';
 
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     const prisma = getPrisma();
     const order = await prisma.order.findUnique({
       where: { orderNumber },
-      include: { payments: true },
+      include: { payments: true, refundOperation: true },
     });
     const paymentRecord = order?.payments.find((payment) => payment.gateway === 'razorpay');
     if (!order || !paymentRecord || paymentRecord.gatewayOrderId !== razorpayOrderId) {
@@ -45,6 +46,13 @@ export async function POST(request: Request) {
     }
     if (order.paymentStatus === 'paid') {
       if (paymentRecord.gatewayPaymentId === paymentId) {
+        if (order.status === 'cancelled' && order.refundOperation?.status === 'pending') {
+          try {
+            await processRefundOperation(order.refundOperation.id);
+          } catch (error) {
+            console.error('Refund processing could not be completed:', error instanceof Error ? error.message : 'Unknown error');
+          }
+        }
         return NextResponse.json({ verified: true, orderNumber });
       }
       return NextResponse.json({ verified: false, error: 'This order has already been paid.' }, { status: 409 });
@@ -98,6 +106,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ verified: false, error: 'Payment is not captured yet.' }, { status: 202 });
     }
 
+    let refundOperationId: string | null = null;
     await prisma.$transaction(async (transaction) => {
       const current = await transaction.order.findUnique({
         where: { id: order.id },
@@ -115,9 +124,29 @@ export async function POST(request: Request) {
       });
       await transaction.order.update({
         where: { id: current.id },
-        data: { paymentStatus: 'paid', status: 'confirmed', paymentMethod: 'razorpay' },
+        data: {
+          paymentStatus: 'paid',
+          ...(current.status === 'pending' ? { status: 'confirmed' } : {}),
+          paymentMethod: 'razorpay',
+        },
       });
+      if (current.status === 'cancelled') {
+        refundOperationId = await prepareRefundForCapturedPayment(
+          transaction,
+          current.id,
+          paymentId,
+          order.totalPaise
+        );
+      }
     }, { isolationLevel: 'Serializable' });
+
+    if (refundOperationId) {
+      try {
+        await processRefundOperation(refundOperationId);
+      } catch (error) {
+        console.error('Refund processing could not be completed:', error instanceof Error ? error.message : 'Unknown error');
+      }
+    }
 
     return NextResponse.json({ verified: true, orderNumber });
   } catch (error) {

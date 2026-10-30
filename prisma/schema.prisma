@@ -38,6 +38,15 @@ enum PaymentStatus {
   rejected
 }
 
+enum RefundStatus {
+  pending
+  processing
+  completed
+  failed
+  requires_review
+  not_applicable
+}
+
 enum AdminRole {
   admin
   manager
@@ -181,12 +190,17 @@ model Order {
   upiVerifiedAt         DateTime?     @map("upi_verified_at")
   upiRejectedReason     String?       @map("upi_rejected_reason")
   deliveredAt           DateTime?     @map("delivered_at")
+  cancelledAt           DateTime?     @map("cancelled_at")
+  cancellationReason    String?       @map("cancellation_reason")
+  cancellationActor     String?       @map("cancellation_actor")
+  cancellationPreviousStatus OrderStatus? @map("cancellation_previous_status")
   idempotencyKey        String?       @unique @map("idempotency_key")
   guestAccessTokenHash  String?       @map("guest_access_token_hash")
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @updatedAt @map("updated_at")
   items                 OrderItem[]
   payments              Payment[]
+  refundOperation       RefundOperation?
 
   @@index([customerId, createdAt])
   @@index([status, createdAt])
@@ -234,6 +248,25 @@ model Payment {
   @@map("payments")
 }
 
+model RefundOperation {
+  id               String       @id @default(cuid())
+  orderId          String       @unique @map("order_id")
+  order            Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  gateway          String       @default("razorpay")
+  gatewayPaymentId String?      @map("gateway_payment_id")
+  gatewayRefundId  String?      @unique @map("gateway_refund_id")
+  amountPaise      Int          @map("amount_paise")
+  status           RefundStatus @default(pending)
+  attemptCount     Int          @default(0) @map("attempt_count")
+  lastAttemptAt    DateTime?    @map("last_attempt_at")
+  lastError        String?      @map("last_error")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  updatedAt        DateTime     @updatedAt @map("updated_at")
+
+  @@index([status, updatedAt])
+  @@map("refund_operations")
+}
+
 model WebhookEvent {
   id             String    @id @default(cuid())
   gateway        String
@@ -241,6 +274,7 @@ model WebhookEvent {
   eventType      String    @map("event_type")
   gatewayOrderId String?   @map("gateway_order_id")
   gatewayPaymentId String? @map("gateway_payment_id")
+  gatewayRefundId String?  @map("gateway_refund_id")
   processedAt    DateTime? @map("processed_at")
   createdAt      DateTime  @default(now()) @map("created_at")
 

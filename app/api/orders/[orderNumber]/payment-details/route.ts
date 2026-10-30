@@ -44,6 +44,7 @@ export async function POST(
     const order = access.order;
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
     if (
+      order.status === 'cancelled' ||
       !['upi', 'phonepe', 'googlepay', 'paytm'].includes(order.paymentMethod) ||
       !['pending_verification', 'rejected'].includes(order.paymentStatus) ||
       order.upiVerifiedAt

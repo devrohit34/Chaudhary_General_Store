@@ -36,11 +36,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'This checkout request was already submitted.' }, { status: 409 });
     }
 
-    const order = await getPrisma().order.findUnique({
-      where: { id: result.order.id },
-      include: { items: true },
-    });
-    if (!order) throw new Error('New order could not be reloaded.');
+    const order = result.order;
     const response = NextResponse.json({
       order: toOrderDto(order),
     }, { status: 201 });
@@ -59,7 +55,7 @@ export async function GET(request: Request) {
     if (!session) return NextResponse.json({ orders: [] });
     const orders = await getPrisma().order.findMany({
       where: { customerId: session.id },
-      include: { items: true },
+      include: { items: true, refundOperation: true },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });

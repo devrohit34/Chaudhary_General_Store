@@ -76,20 +76,8 @@ export async function POST(request: Request) {
     );
 
     orderId = result.order.id;
-
     const prisma = getPrisma();
-
-    const order = await prisma.order.findUnique({
-      where: { id: result.order.id },
-      include: {
-        items: true,
-        payments: true,
-      },
-    });
-
-    if (!order) {
-      throw new Error('Pending order could not be loaded.');
-    }
+    const order = result.order;
 
     const existingPayment = order.payments.find(
       (payment) => payment.gateway === 'razorpay'

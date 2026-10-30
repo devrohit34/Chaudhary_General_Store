@@ -106,6 +106,12 @@ export type Order = {
   created_at: string;
   updated_at: string;
   delivered_at: string | null;
+  cancelled_at: string | null;
+  cancellation_reason: string | null;
+  refund_gateway: string | null;
+  refund_can_reconcile: boolean;
+  refund_status: string;
+  refund_reference: string | null;
   order_items?: OrderItem[];
 };
 

@@ -64,6 +64,10 @@ export function toOrderDto(order: {
   isExpress: boolean; utrNumber: string | null; paymentScreenshotUrl: string | null;
   upiVerifiedAt: Date | null; upiRejectedReason: string | null; qrCreatedAt: Date | null;
   createdAt: Date; updatedAt: Date; deliveredAt: Date | null;
+  cancelledAt?: Date | null; cancellationReason?: string | null;
+  refundOperation?: {
+    gateway: string; gatewayPaymentId: string | null; status: string; gatewayRefundId: string | null;
+  } | null;
   items?: Parameters<typeof toOrderItemDto>[0][];
 }): Order {
   const address = asRecord(order.addressSnapshot);
@@ -89,6 +93,12 @@ export function toOrderDto(order: {
     upi_rejected_reason: order.upiRejectedReason, qr_created_at: order.qrCreatedAt?.toISOString() ?? null,
     created_at: order.createdAt.toISOString(), updated_at: order.updatedAt.toISOString(),
     delivered_at: order.deliveredAt?.toISOString() ?? null,
+    cancelled_at: order.cancelledAt?.toISOString() ?? null,
+    cancellation_reason: order.cancellationReason ?? null,
+    refund_gateway: order.refundOperation?.gateway ?? null,
+    refund_can_reconcile: Boolean(order.refundOperation?.gatewayPaymentId),
+    refund_status: order.refundOperation?.status ?? 'not_applicable',
+    refund_reference: order.refundOperation?.gatewayRefundId ?? null,
     order_items: order.items?.map(toOrderItemDto),
   };
 }

@@ -23,6 +23,9 @@ export async function PATCH(
     const prisma = getPrisma();
     const current = await prisma.order.findUnique({ where: { id }, include: { items: true } });
     if (!current) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
+    if (current.status === 'cancelled') {
+      return NextResponse.json({ error: 'Cancelled order payments cannot be reviewed here.' }, { status: 409 });
+    }
     if (
       !['upi', 'phonepe', 'googlepay', 'paytm'].includes(current.paymentMethod) ||
       current.paymentStatus !== 'pending_verification'
@@ -32,21 +35,21 @@ export async function PATCH(
 
     const now = new Date();
     const saved = await prisma.$transaction(async (transaction) => {
-      const order = await transaction.order.update({
-        where: { id },
+      const changed = await transaction.order.updateMany({
+        where: { id, status: current.status, paymentStatus: 'pending_verification' },
         data: parsed.data.action === 'approve'
           ? {
             paymentStatus: 'paid',
             upiVerifiedAt: now,
             upiRejectedReason: null,
-            status: 'confirmed',
+            ...(current.status === 'pending' ? { status: 'confirmed' } : {}),
           }
           : {
             paymentStatus: 'rejected',
             upiRejectedReason: parsed.data.reason || 'Payment could not be verified.',
           },
-        include: { items: true },
       });
+      if (changed.count !== 1) throw new Error('Order changed before payment review completed.');
       await transaction.payment.updateMany({
         where: { orderId: id, gateway: 'manual_upi', status: 'pending' },
         data: {
@@ -54,6 +57,11 @@ export async function PATCH(
           verifiedAt: parsed.data.action === 'approve' ? now : null,
         },
       });
+      const order = await transaction.order.findUnique({
+        where: { id },
+        include: { items: true, refundOperation: true },
+      });
+      if (!order) throw new Error('Reviewed order could not be reloaded.');
       return order;
     });
 

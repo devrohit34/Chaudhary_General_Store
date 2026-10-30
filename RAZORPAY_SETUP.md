@@ -85,9 +85,28 @@ Subscribe to:
 
 - `payment.captured`
 - `payment.failed`
+- `refund.created`
+- `refund.processed`
+- `refund.failed`
 
-The handler verifies the signature over the raw request body and records event IDs to make processing idempotent. A failed payment attempt does not mark the order paid or prevent another attempt; only a captured payment matching the stored order amount and currency is confirmed.
+The handler verifies the signature over the raw request body and records event IDs to make processing idempotent. A failed payment attempt does not mark the order paid or prevent another attempt; only a captured payment matching the stored order amount and currency is confirmed. Refund events are matched to the persisted refund operation and the verified payment; delayed events do not restore a cancelled order to fulfilment.
 
+## 4. Order cancellation and refunds
+
+Customers can cancel orders in `pending`, `confirmed`, and `processing` status. Cancellation is not available after the order reaches `out_for_delivery`, `delivered`, `returned`, or `cancelled`. Inventory reserved at checkout is restored in the same database transaction that marks the order cancelled.
+
+Refunds are separate from cancellation. The server creates a full refund operation only from stored payment records and submits the amount in paise. Refund completion is shown only after a provider response or authenticated refund webhook confirms it. Uncertain requests are held for reconciliation and are not submitted again automatically.
+
+In the admin order details, use **Process Refund** for an unsubmitted operation or **Reconcile Refund** to look up provider status. A retry is allowed only after the server checks Razorpay and an administrator confirms no refund exists; no more than three attempts are allowed. Refund operations without a verified Razorpay payment reference require manual review. There is no background job system configured for this application.
+
+Apply the checked-in schema migration only after checking the intended database target and taking the appropriate backup:
+
+```powershell
+npm run db:migrate:status
+npm run db:migrate:deploy
+```
+
+`db:migrate:deploy` applies pending migrations to the database selected by the private `DIRECT_URL`/`DATABASE_URL` configuration. Do not run it against production until the migration and deployment window are approved.
 
 ## Quick start (Windows / PowerShell)
 
@@ -104,18 +123,18 @@ npm run dev
 ```
 
 5. Open the local storefront, add an available product to the cart, and test checkout using Razorpay **Test Mode** credentials.
-6. In Razorpay Dashboard, configure the webhook URL `https://<your-deployed-domain>/api/payments/webhook` and subscribe to `payment.captured` and `payment.failed`. The webhook secret entered in the dashboard must exactly match `RAZORPAY_WEBHOOK_SECRET` in the deployment environment.
-7. Before going live, deploy the app with all required environment variables, run database migrations only after reviewing the migration and database target, then test a complete payment and verify the order is marked paid.
+6. In Razorpay Dashboard, configure the webhook URL `https://<your-deployed-domain>/api/payments/webhook` and subscribe to the two payment events and three refund events above. The webhook secret entered in the dashboard must exactly match `RAZORPAY_WEBHOOK_SECRET` in the deployment environment.
+7. Before going live, deploy the app with all required environment variables, run database migrations only after reviewing the migration and database target, then test payment, cancellation, refund status, and duplicate webhook delivery in Test Mode.
 
 **Important:** This ZIP contains source code and an environment-variable template, not your private `.env.local` file. Keep your existing local file separately and configure the same variables in your hosting provider. Do not paste secret values into source files or prefix server secrets with `NEXT_PUBLIC_`.
 
-## 4. Product images and manual UPI screenshots
+## 5. Product images and manual UPI screenshots
 
 Set `BLOB_READ_WRITE_TOKEN` to enable authenticated admin product-image uploads to public Vercel Blob storage. Product images are public storefront assets.
 
 Manual UPI screenshots are validated and stored privately in the Neon database; retrieval requires the associated customer/order access or an authenticated admin session. Razorpay payments do not use screenshot submission.
 
-## 5. Validate before live payments
+## 6. Validate before live payments
 
 1. Configure test-mode Razorpay credentials in a non-production environment.
 2. Test successful capture, failed attempts, cancellation, webhook retries, duplicate webhook delivery, and order status recovery.

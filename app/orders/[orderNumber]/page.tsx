@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ChevronRight, CheckCircle, Clock, Package, Truck, MapPin, Receipt, Copy, Upload, AlertCircle, Check, XCircle } from 'lucide-react';
 import { UpiDynamicQr } from '@/components/upi-dynamic-qr';
+import { OrderCancelButton } from '@/components/order-cancel-button';
 import { toast } from 'sonner';
 
 const UPI_ID = '8051806325@axl';
@@ -75,8 +76,9 @@ export default function OrderDetailPage() {
   }, [order?.payment_method, order?.payment_status, fetchOrder]);
 
   const isUpiOrder = order && ['upi', 'phonepe', 'googlepay', 'paytm'].includes(order.payment_method);
-  const needsPaymentSubmission = isUpiOrder && order && order.payment_status === 'pending_verification' && !order.utr_number;
-  const paymentRejected = isUpiOrder && order && order.payment_status === 'rejected';
+  const needsPaymentSubmission = isUpiOrder && order && order.status !== 'cancelled' &&
+    order.payment_status === 'pending_verification' && !order.utr_number;
+  const paymentRejected = isUpiOrder && order && order.status !== 'cancelled' && order.payment_status === 'rejected';
 
   const copyUpiId = () => {
     navigator.clipboard.writeText(UPI_ID);
@@ -143,7 +145,7 @@ export default function OrderDetailPage() {
     );
   }
 
-  const currentStepIndex = trackingSteps.findIndex((s) => s.key === order.status);
+  const currentStepIndex = order.status === 'cancelled' ? -1 : trackingSteps.findIndex((s) => s.key === order.status);
   const payConfig = paymentStatusConfig[order.payment_status] || paymentStatusConfig.pending;
   const PayIcon = payConfig.icon;
   return (
@@ -167,7 +169,10 @@ export default function OrderDetailPage() {
                   Placed on {new Date(order.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
                 </p>
               </div>
-              <Badge className="bg-primary/10 text-primary capitalize">{order.status.replace(/_/g, ' ')}</Badge>
+              <div className="flex flex-col items-end gap-2">
+                <Badge className="bg-primary/10 text-primary capitalize">{order.status.replace(/_/g, ' ')}</Badge>
+                <OrderCancelButton order={order} onCancelled={setOrder} />
+              </div>
             </div>
 
             <div className="relative">
@@ -190,7 +195,7 @@ export default function OrderDetailPage() {
                 })}
               </div>
               <div className="absolute top-5 left-0 right-0 h-0.5 bg-muted -z-10">
-                <div className="h-full bg-primary transition-all" style={{ width: `${(currentStepIndex / (trackingSteps.length - 1)) * 100}%` }} />
+                <div className="h-full bg-primary transition-all" style={{ width: `${(Math.max(currentStepIndex, 0) / (trackingSteps.length - 1)) * 100}%` }} />
               </div>
             </div>
 
@@ -200,6 +205,37 @@ export default function OrderDetailPage() {
               </div>
             )}
           </div>
+
+          {order.status === 'cancelled' && (
+            <div className="border rounded-xl p-5 bg-card space-y-2">
+              <h2 className="font-semibold">Cancellation and refund</h2>
+              <p className="text-sm">Your order has been cancelled.</p>
+              {order.cancelled_at && (
+                <p className="text-sm text-muted-foreground">
+                  Cancelled on {new Date(order.cancelled_at).toLocaleString('en-IN')}
+                </p>
+              )}
+              {order.cancellation_reason && (
+                <p className="text-sm text-muted-foreground">Reason: {order.cancellation_reason}</p>
+              )}
+              {order.refund_status === 'completed' && <p className="text-sm text-green-700">Your refund has been completed.</p>}
+              {['pending', 'processing'].includes(order.refund_status) && (
+                <p className="text-sm text-blue-700">Your refund is being processed.</p>
+              )}
+              {order.refund_status === 'requires_review' && (
+                <p className="text-sm text-amber-700">Your payment is being reconciled before the refund can be confirmed.</p>
+              )}
+              {order.refund_status === 'failed' && (
+                <p className="text-sm text-amber-700">Your refund needs attention. Please contact the store for assistance.</p>
+              )}
+              {order.refund_status === 'not_applicable' && order.payment_status !== 'paid' && (
+                <p className="text-sm text-muted-foreground">No online refund is due for this order.</p>
+              )}
+              {order.refund_reference && (
+                <p className="text-xs text-muted-foreground">Refund reference: {order.refund_reference}</p>
+              )}
+            </div>
+          )}
 
           {/* UPI Payment Section */}
           {isUpiOrder && (
@@ -394,7 +430,7 @@ export default function OrderDetailPage() {
             </div>
           </div>
 
-          {order.delivery_otp && order.status !== 'delivered' && (
+          {order.delivery_otp && !['delivered', 'cancelled'].includes(order.status) && (
             <div className="border-2 border-dashed border-primary/30 rounded-xl p-4 bg-primary/5 text-center">
               <p className="text-sm text-muted-foreground mb-1">Delivery OTP</p>
               <p className="text-3xl font-bold tracking-widest text-primary">{order.delivery_otp}</p>

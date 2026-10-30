@@ -36,7 +36,7 @@ export async function GET(request: Request) {
         ...(validPaymentStatus?.success ? { paymentStatus: validPaymentStatus.data } : {}),
         ...(search ? { orderNumber: { contains: search, mode: 'insensitive' as const } } : {}),
       },
-      include: { items: true },
+      include: { items: true, refundOperation: true },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });

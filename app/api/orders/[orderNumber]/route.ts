@@ -12,7 +12,7 @@ export async function GET(
     const { orderNumber } = await params;
     const order = await getPrisma().order.findUnique({
       where: { orderNumber },
-      include: { items: true },
+      include: { items: true, refundOperation: true },
     });
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
 

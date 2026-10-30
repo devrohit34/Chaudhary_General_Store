@@ -5,6 +5,7 @@ import { calculateOrderAmounts } from '@/lib/money';
 import { createOrderAccessToken, createOrderNumber, hashOrderAccessToken } from '@/lib/order-access';
 import type { CheckoutInput } from '@/lib/checkout-validation';
 import type { PaymentMethod } from '@/generated/prisma/client';
+import type { Prisma } from '@/generated/prisma/client';
 
 export class CheckoutError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -20,7 +21,10 @@ export async function createCheckoutOrder(
   customer?: { id: string; email: string }
 ) {
   const prisma = getPrisma();
-  const existing = await prisma.order.findUnique({ where: { idempotencyKey } });
+  const existing = await prisma.order.findUnique({
+    where: { idempotencyKey },
+    include: { items: true, payments: true },
+  });
   if (existing) {
     if (existing.paymentStatus === 'failed' || existing.status === 'cancelled') {
       throw new CheckoutError('This checkout attempt has expired. Start a new checkout.', 409);
@@ -126,7 +130,7 @@ export async function createCheckoutOrder(
               ? { payments: { create: { gateway: 'manual_upi', status: 'pending_verification', amountPaise: totals.totalPaise } } }
             : {}),
         },
-        include: { items: true },
+        include: { items: true, payments: true },
       });
     }, { isolationLevel: 'Serializable' });
 
@@ -134,7 +138,10 @@ export async function createCheckoutOrder(
   } catch (error) {
     if (error instanceof CheckoutError) throw error;
     if (error instanceof Error && error.message.includes('Unique constraint')) {
-      const retryOrder = await prisma.order.findUnique({ where: { idempotencyKey }, include: { items: true } });
+      const retryOrder = await prisma.order.findUnique({
+        where: { idempotencyKey },
+        include: { items: true, payments: true },
+      });
       if (retryOrder) return { order: retryOrder, orderAccessToken, alreadyExists: true };
     }
     throw error;
@@ -143,24 +150,29 @@ export async function createCheckoutOrder(
 
 export async function releaseOrderInventory(orderId: string) {
   const prisma = getPrisma();
-  await prisma.$transaction(async (transaction) => {
-    const order = await transaction.order.findUnique({
-      where: { id: orderId },
-      include: { items: true },
-    });
-    if (!order || order.inventoryReleased || order.paymentStatus === 'paid') return;
+  await prisma.$transaction(
+    (transaction) => releaseOrderInventoryInTransaction(transaction, orderId),
+    { isolationLevel: 'Serializable' }
+  );
+}
 
-    for (const item of order.items) {
-      if (item.productId) {
-        await transaction.product.update({
-          where: { id: item.productId },
-          data: { stockQuantity: { increment: item.quantity } },
-        });
-      }
+export async function releaseOrderInventoryInTransaction(transaction: Prisma.TransactionClient, orderId: string) {
+  const order = await transaction.order.findUnique({
+    where: { id: orderId },
+    include: { items: true },
+  });
+  if (!order || order.inventoryReleased || order.paymentStatus === 'paid') return;
+
+  for (const item of order.items) {
+    if (item.productId) {
+      await transaction.product.updateMany({
+        where: { id: item.productId },
+        data: { stockQuantity: { increment: item.quantity } },
+      });
     }
-    await transaction.order.update({
-      where: { id: order.id },
-      data: { inventoryReleased: true },
-    });
-  }, { isolationLevel: 'Serializable' });
+  }
+  await transaction.order.updateMany({
+    where: { id: order.id, inventoryReleased: false },
+    data: { inventoryReleased: true },
+  });
 }

@@ -7,6 +7,7 @@ import type { Order } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ChevronRight, Package, Clock, CheckCircle, Truck, XCircle } from 'lucide-react';
+import { OrderCancelButton } from '@/components/order-cancel-button';
 
 const statusConfig: Record<string, { label: string; icon: any; color: string }> = {
   pending: { label: 'Pending', icon: Clock, color: 'bg-yellow-100 text-yellow-700' },
@@ -70,8 +71,8 @@ export default function OrdersPage() {
             const status = statusConfig[order.status] || statusConfig.pending;
             const StatusIcon = status.icon;
             return (
-              <Link key={order.id} href={`/orders/${order.order_number}`}>
-                <div className="border rounded-xl p-4 bg-card hover:shadow-md transition-shadow">
+              <div key={order.id} className="border rounded-xl p-4 bg-card hover:shadow-md transition-shadow">
+                <Link href={`/orders/${order.order_number}`} className="block">
                   <div className="flex items-start justify-between mb-3">
                     <div>
                       <div className="font-semibold">Order #{order.order_number}</div>
@@ -101,8 +102,17 @@ export default function OrdersPage() {
                     <span className="text-sm text-muted-foreground">{order.order_items?.length || 0} items</span>
                     <span className="font-bold">₹{order.total_amount}</span>
                   </div>
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    {order.payment_method.toUpperCase()} · Payment: {order.payment_status.replace(/_/g, ' ')}
+                    {order.refund_status !== 'not_applicable' && ` · Refund: ${order.refund_status.replace(/_/g, ' ')}`}
+                  </div>
+                </Link>
+                <div className="mt-3 flex justify-end">
+                  <OrderCancelButton order={order} onCancelled={(updatedOrder) => {
+                    setOrders((current) => current.map((entry) => entry.id === updatedOrder.id ? updatedOrder : entry));
+                  }} />
                 </div>
-              </Link>
+              </div>
             );
           })}
         </div>
