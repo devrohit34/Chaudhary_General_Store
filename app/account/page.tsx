@@ -36,6 +36,7 @@ export default function AccountPage() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showSigninPassword, setShowSigninPassword] = useState(false);
   const [showSignupPassword, setShowSignupPassword] = useState(false);
   const [phone, setPhone] = useState('');
   const [fullName, setFullName] = useState('');
@@ -133,7 +134,28 @@ export default function AccountPage() {
             <Card>
               <CardContent className="space-y-4 pt-6">
                 <div><Label>Email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" /></div>
-                <div><Label>Password</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" /></div>
+                <div>
+                  <Label>Password</Label>
+                  <div className="relative">
+                    <Input
+                      type={showSigninPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSigninPassword((visible) => !visible)}
+                      aria-label={showSigninPassword ? 'Hide password' : 'Show password'}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                      {showSigninPassword
+                        ? <EyeOff className="h-4 w-4" aria-hidden="true" />
+                        : <Eye className="h-4 w-4" aria-hidden="true" />}
+                    </button>
+                  </div>
+                </div>
                 <Button onClick={signIn} className="w-full">Sign In</Button>
                 <p className="text-xs text-center text-muted-foreground">
                   Admin: kkc8014@gmail.com
