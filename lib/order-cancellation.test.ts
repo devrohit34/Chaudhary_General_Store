@@ -29,7 +29,9 @@ function createTransaction(order: ReturnType<typeof makeOrder>) {
       findUnique: vi.fn(async () => order),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
-    product: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    $queryRaw: vi.fn(async () => [...new Set(
+      order.items.flatMap((item) => item.productId ? [item.productId] : [])
+    )].map((id) => ({ id }))),
     refundOperation: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'refund-1', ...data })),
     },
@@ -39,10 +41,85 @@ function createTransaction(order: ReturnType<typeof makeOrder>) {
 
 function mockPrisma(transaction: ReturnType<typeof createTransaction>) {
   const prisma = {
-    $transaction: vi.fn(async (callback: (tx: typeof transaction) => Promise<unknown>) => callback(transaction)),
+    $transaction: vi.fn(async (
+      callback: (tx: typeof transaction) => Promise<unknown>,
+      _options?: unknown
+    ) => callback(transaction)),
   };
   vi.mocked(getPrisma).mockReturnValue(prisma as never);
   return prisma;
+}
+
+type TestOrderItem = { productId: string | null; quantity: number };
+
+function createMemoryPrisma(
+  items: TestOrderItem[],
+  initialStock: Record<string, number>,
+  failInventoryUpdate = false
+) {
+  let orderState: Record<string, unknown> = makeOrder({ items });
+  let stockState = new Map(Object.entries(initialStock));
+  let transactionQueue = Promise.resolve();
+  let inventoryUpdateCount = 0;
+  let inventoryQueryValues: unknown[] = [];
+  const prisma = {
+    $transaction: vi.fn(async (callback: (transaction: never) => Promise<unknown>) => {
+      const previousTransaction = transactionQueue;
+      let releaseTransaction!: () => void;
+      transactionQueue = new Promise((resolve) => { releaseTransaction = resolve; });
+      await previousTransaction;
+
+      const draftOrder = { ...orderState };
+      const draftStock = new Map(stockState);
+      const transaction = {
+        order: {
+          findUnique: vi.fn(async () => ({ ...draftOrder, items, payments: [], refundOperation: null })),
+          updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+            if (!['pending', 'confirmed', 'processing'].includes(String(draftOrder.status))) {
+              return { count: 0 };
+            }
+            Object.assign(draftOrder, data);
+            return { count: 1 };
+          }),
+        },
+        $queryRaw: vi.fn(async (_query: TemplateStringsArray, values: { values: unknown[] }) => {
+          inventoryUpdateCount += 1;
+          inventoryQueryValues = values.values;
+          const updatedIds = new Set<string>();
+          for (let index = 0; index < values.values.length; index += 2) {
+            const productId = values.values[index];
+            const quantity = values.values[index + 1];
+            if (typeof productId !== 'string' || typeof quantity !== 'number') {
+              throw new Error('Invalid inventory query parameters.');
+            }
+            if (!draftStock.has(productId)) continue;
+            draftStock.set(productId, (draftStock.get(productId) ?? 0) + quantity);
+            updatedIds.add(productId);
+          }
+          if (failInventoryUpdate) throw new Error('Simulated inventory update failure.');
+          return [...updatedIds].map((id) => ({ id }));
+        }),
+        refundOperation: { create: vi.fn(async () => ({ id: 'refund-1' })) },
+      };
+
+      try {
+        const result = await callback(transaction as never);
+        orderState = draftOrder;
+        stockState = draftStock;
+        return result;
+      } finally {
+        releaseTransaction();
+      }
+    }),
+  };
+  vi.mocked(getPrisma).mockReturnValue(prisma as never);
+
+  return {
+    prisma,
+    getInventoryUpdateCount: () => inventoryUpdateCount,
+    getInventoryQueryValues: () => inventoryQueryValues,
+    getState: () => ({ status: orderState.status, stock: Object.fromEntries(stockState) }),
+  };
 }
 
 afterEach(() => {
@@ -54,20 +131,20 @@ afterEach(() => {
 describe('order cancellation transaction', () => {
   it('cancels eligible COD orders and restores reserved inventory once', async () => {
     const transaction = createTransaction(makeOrder());
-    mockPrisma(transaction);
+    const prisma = mockPrisma(transaction);
 
     const result = await cancelOrder('order-1', 'customer', 'No longer needed');
 
     expect(result).toMatchObject({ orderId: 'order-1', refundOperationId: null, refundStatus: 'not_applicable' });
-    expect(transaction.product.updateMany).toHaveBeenCalledOnce();
-    expect(transaction.product.updateMany).toHaveBeenCalledWith({
-      where: { id: 'product-1' },
-      data: { stockQuantity: { increment: 2 } },
-    });
+    expect(transaction.$queryRaw).toHaveBeenCalledOnce();
     expect(transaction.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'order-1', status: { in: ['pending', 'confirmed', 'processing'] } },
       data: expect.objectContaining({ status: 'cancelled', inventoryReleased: true }),
     }));
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: 'Serializable', maxWait: 5_000, timeout: 15_000 }
+    );
     expect(transaction.refundOperation.create).not.toHaveBeenCalled();
   });
 
@@ -77,7 +154,7 @@ describe('order cancellation transaction', () => {
 
     await cancelOrder('order-1', 'customer', 'No longer needed');
 
-    expect(transaction.product.updateMany).not.toHaveBeenCalled();
+    expect(transaction.$queryRaw).not.toHaveBeenCalled();
     expect(transaction.order.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.not.objectContaining({ inventoryReleased: true }),
     }));
@@ -89,7 +166,7 @@ describe('order cancellation transaction', () => {
 
     await expect(cancelOrder('order-1', 'customer', 'No longer needed')).rejects.toMatchObject({ status: 409 });
     expect(transaction.order.updateMany).not.toHaveBeenCalled();
-    expect(transaction.product.updateMany).not.toHaveBeenCalled();
+    expect(transaction.$queryRaw).not.toHaveBeenCalled();
   });
 
   it('creates a refund only from a captured Razorpay payment stored on the order', async () => {
@@ -184,7 +261,86 @@ describe('order cancellation transaction', () => {
     mockPrisma(transaction);
 
     await expect(cancelOrder('order-1', 'customer', 'No longer needed')).rejects.toMatchObject({ status: 409 });
-    expect(transaction.product.updateMany).not.toHaveBeenCalled();
+    expect(transaction.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2, 10, 20])('cancels an order with %i items in one stock update', async (itemCount) => {
+    const items = Array.from({ length: itemCount }, (_, index) => ({
+      productId: `product-${index + 1}`,
+      quantity: 2,
+    }));
+    const startingStock = Object.fromEntries(items.map(({ productId }) => [productId, 5]));
+    const memory = createMemoryPrisma(items, startingStock);
+
+    await cancelOrder('order-1', 'customer', 'No longer needed');
+
+    expect(memory.getState()).toEqual({
+      status: 'cancelled',
+      stock: Object.fromEntries(items.map(({ productId }) => [productId, 7])),
+    });
+    expect(memory.getInventoryUpdateCount()).toBe(1);
+  });
+
+  it('aggregates duplicate product lines before restoring stock', async () => {
+    const items = [
+      { productId: 'product-1', quantity: 2 },
+      { productId: 'product-1', quantity: 3 },
+    ];
+    const memory = createMemoryPrisma(items, { 'product-1': 5 });
+
+    await cancelOrder('order-1', 'customer', 'No longer needed');
+
+    expect(memory.getState()).toEqual({ status: 'cancelled', stock: { 'product-1': 10 } });
+    expect(memory.getInventoryUpdateCount()).toBe(1);
+    expect(memory.getInventoryQueryValues()).toEqual(['product-1', 5]);
+  });
+
+  it('restores stock only once for repeated and concurrent cancellation requests', async () => {
+    const memory = createMemoryPrisma([{ productId: 'product-1', quantity: 4 }], { 'product-1': 1 });
+    const results = await Promise.allSettled([
+      cancelOrder('order-1', 'customer', 'No longer needed'),
+      cancelOrder('order-1', 'customer', 'No longer needed'),
+    ]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(memory.getState()).toEqual({ status: 'cancelled', stock: { 'product-1': 5 } });
+    expect(memory.getInventoryUpdateCount()).toBe(1);
+
+    await expect(cancelOrder('order-1', 'customer', 'No longer needed')).rejects.toMatchObject({ status: 409 });
+    expect(memory.getState().stock).toEqual({ 'product-1': 5 });
+    expect(memory.getInventoryUpdateCount()).toBe(1);
+  });
+
+  it('rolls back the order transition and stock when inventory restoration fails', async () => {
+    const memory = createMemoryPrisma([{ productId: 'product-1', quantity: 4 }], { 'product-1': 1 }, true);
+
+    await expect(cancelOrder('order-1', 'customer', 'No longer needed')).rejects.toThrow(
+      'Simulated inventory update failure.'
+    );
+
+    expect(memory.getState()).toEqual({ status: 'pending', stock: { 'product-1': 1 } });
+  });
+
+  it('rolls back when a referenced product is missing', async () => {
+    const memory = createMemoryPrisma([{ productId: 'missing-product', quantity: 4 }], {});
+
+    await expect(cancelOrder('order-1', 'customer', 'No longer needed')).rejects.toThrow(
+      'Could not restore inventory for every order item.'
+    );
+
+    expect(memory.getState()).toEqual({ status: 'pending', stock: {} });
+  });
+
+  it.each([0, -1])('rejects invalid inventory quantity %i without changing order or stock', async (quantity) => {
+    const memory = createMemoryPrisma([{ productId: 'product-1', quantity }], { 'product-1': 1 });
+
+    await expect(cancelOrder('order-1', 'customer', 'No longer needed')).rejects.toThrow(
+      'Order contains an invalid inventory quantity.'
+    );
+
+    expect(memory.getState()).toEqual({ status: 'pending', stock: { 'product-1': 1 } });
+    expect(memory.getInventoryUpdateCount()).toBe(0);
   });
 });
 

@@ -44,7 +44,14 @@ export async function POST(request: Request) {
     return response;
   } catch (error) {
     if (error instanceof CheckoutError) return NextResponse.json({ error: error.message }, { status: error.status });
-    console.error('Order creation failed:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('Order creation failed:', {
+      paymentMethod: parsed.data.paymentMethod,
+      itemCount: parsed.data.items.length,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      code: typeof error === 'object' && error !== null && 'code' in error
+        ? error.code
+        : undefined,
+    });
     return NextResponse.json({ error: 'Could not place your order. Please try again.' }, { status: 503 });
   }
 }

@@ -1,5 +1,5 @@
 import 'server-only';
-import type { Prisma } from '../generated/prisma/client';
+import { Prisma, type Prisma as PrismaTypes } from '../generated/prisma/client';
 import { getPrisma } from './prisma';
 import { getRazorpayConfig, razorpayAuth } from './razorpay-server';
 import { isOrderCancellationEligible } from './order-cancellation-policy';
@@ -43,12 +43,33 @@ export async function cancelOrder(orderId: string, actor: string, reason: string
     }
 
     if (!order.inventoryReleased) {
+      const quantitiesByProduct = new Map<string, number>();
       for (const item of order.items) {
-        if (item.productId) {
-          await transaction.product.updateMany({
-            where: { id: item.productId },
-            data: { stockQuantity: { increment: item.quantity } },
-          });
+        if (!Number.isSafeInteger(item.quantity) || item.quantity <= 0) {
+          throw new Error('Order contains an invalid inventory quantity.');
+        }
+        if (!item.productId) continue;
+
+        const quantity = (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity;
+        if (!Number.isSafeInteger(quantity) || quantity > 2_147_483_647) {
+          throw new Error('Order contains an invalid inventory quantity.');
+        }
+        quantitiesByProduct.set(item.productId, quantity);
+      }
+
+      if (quantitiesByProduct.size > 0) {
+        const restoredProducts = await transaction.$queryRaw<Array<{ id: string }>>`
+          UPDATE "products" AS product
+          SET "stock_quantity" = product."stock_quantity" + requested."quantity"::integer
+          FROM (VALUES ${Prisma.join([...quantitiesByProduct].map(([productId, quantity]) => Prisma.sql`(
+            ${productId},
+            ${quantity}
+          )`))}) AS requested("id", "quantity")
+          WHERE product."id" = requested."id"
+          RETURNING product."id"
+        `;
+        if (restoredProducts.length !== quantitiesByProduct.size) {
+          throw new Error('Could not restore inventory for every order item.');
         }
       }
     }
@@ -94,11 +115,11 @@ export async function cancelOrder(orderId: string, actor: string, reason: string
       refundOperationId,
       refundStatus: paymentStatus,
     };
-  }, { isolationLevel: 'Serializable' });
+  }, { isolationLevel: 'Serializable', maxWait: 5_000, timeout: 15_000 });
 }
 
 export async function prepareRefundForCapturedPayment(
-  transaction: Prisma.TransactionClient,
+  transaction: PrismaTypes.TransactionClient,
   orderId: string,
   paymentId: string,
   amountPaise: number
@@ -140,7 +161,7 @@ export async function prepareRefundForCapturedPayment(
   return operation.id;
 }
 
-export async function markRefundNotApplicable(transaction: Prisma.TransactionClient, orderId: string) {
+export async function markRefundNotApplicable(transaction: PrismaTypes.TransactionClient, orderId: string) {
   await transaction.refundOperation.updateMany({
     where: { orderId, status: 'requires_review' },
     data: {
@@ -293,7 +314,7 @@ export async function processRefundOperation(operationId: string) {
 }
 
 export async function recordRefundWebhook(
-  transaction: Prisma.TransactionClient,
+  transaction: PrismaTypes.TransactionClient,
   details: { paymentId: string; refundId: string; amountPaise: number; currency: string; status: string }
 ) {
   const operation = await transaction.refundOperation.findFirst({

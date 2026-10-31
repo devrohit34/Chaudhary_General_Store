@@ -5,7 +5,7 @@ import { calculateOrderAmounts } from '@/lib/money';
 import { createOrderAccessToken, createOrderNumber, hashOrderAccessToken } from '@/lib/order-access';
 import type { CheckoutInput } from '@/lib/checkout-validation';
 import type { PaymentMethod } from '@/generated/prisma/client';
-import type { Prisma } from '@/generated/prisma/client';
+import { Prisma } from '@/generated/prisma/client';
 
 export class CheckoutError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -38,6 +38,9 @@ export async function createCheckoutOrder(
 
   const quantities = new Map<string, number>();
   for (const item of input.items) {
+    if (!Number.isSafeInteger(item.quantity) || item.quantity <= 0 || item.quantity > 100) {
+      throw new CheckoutError('One or more cart quantities are outside the allowed range.');
+    }
     quantities.set(item.product_id, (quantities.get(item.product_id) ?? 0) + item.quantity);
   }
   if (quantities.size > 50 || [...quantities.values()].some((quantity) => quantity > 100)) {
@@ -45,6 +48,7 @@ export async function createCheckoutOrder(
   }
 
   const productIds = [...quantities.keys()];
+  const reservationProductIds = [...productIds].sort();
   const orderNumber = createOrderNumber();
   const orderAccessToken = createOrderAccessToken(idempotencyKey);
   const accessTokenHash = hashOrderAccessToken(orderAccessToken);
@@ -53,6 +57,16 @@ export async function createCheckoutOrder(
     const order = await prisma.$transaction(async (transaction) => {
       const products = await transaction.product.findMany({
         where: { id: { in: productIds }, isActive: true },
+        select: {
+          id: true,
+          name: true,
+          stockQuantity: true,
+          pricePaise: true,
+          imageUrl: true,
+          brand: true,
+          unit: true,
+          gstBasisPoints: true,
+        },
       });
       if (products.length !== productIds.length) {
         throw new CheckoutError('A product is no longer available. Refresh your cart.');
@@ -86,14 +100,26 @@ export async function createCheckoutOrder(
         throw new CheckoutError('Order amount is outside the supported range.');
       }
 
-      for (const item of orderItems) {
-        const reserved = await transaction.product.updateMany({
-          where: { id: item.productId!, isActive: true, stockQuantity: { gte: item.quantity } },
-          data: { stockQuantity: { decrement: item.quantity } },
-        });
-        if (reserved.count !== 1) {
-          throw new CheckoutError(`${item.productName} just sold out. Refresh your cart.`);
-        }
+      const reservedProducts = await transaction.$queryRaw<Array<{ id: string }>>`
+        UPDATE "products" AS product
+        SET "stock_quantity" = product."stock_quantity" - requested.quantity::integer
+        FROM (VALUES ${Prisma.join(reservationProductIds.map((productId) => Prisma.sql`(
+          ${productId},
+          ${quantities.get(productId)}
+        )`))}) AS requested("id", "quantity")
+        WHERE product."id" = requested."id"
+          AND product."is_active" = TRUE
+          AND product."stock_quantity" >= requested.quantity::integer
+        RETURNING product."id"
+      `;
+      if (reservedProducts.length !== productIds.length) {
+        const reservedIds = new Set(reservedProducts.map((product) => product.id));
+        const unavailable = orderItems.find((item) => !reservedIds.has(item.productId!));
+        throw new CheckoutError(
+          unavailable
+            ? `${unavailable.productName} just sold out. Refresh your cart.`
+            : 'A product just sold out. Refresh your cart.'
+        );
       }
 
       return transaction.order.create({
@@ -122,7 +148,7 @@ export async function createCheckoutOrder(
             : null,
           idempotencyKey,
           guestAccessTokenHash: accessTokenHash,
-          items: { create: orderItems },
+          items: { createMany: { data: orderItems } },
           ...(paymentMethod === 'razorpay'
             ? { payments: { create: { gateway: 'razorpay', status: 'pending', amountPaise: totals.totalPaise } } }
             : paymentMethod === 'upi' || paymentMethod === 'phonepe' ||
@@ -132,12 +158,19 @@ export async function createCheckoutOrder(
         },
         include: { items: true, payments: true },
       });
-    }, { isolationLevel: 'Serializable' });
+    }, {
+      isolationLevel: 'Serializable',
+      maxWait: 5_000,
+      timeout: 15_000,
+    });
 
     return { order, orderAccessToken, alreadyExists: false };
   } catch (error) {
     if (error instanceof CheckoutError) throw error;
-    if (error instanceof Error && error.message.includes('Unique constraint')) {
+    if (
+      (typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002') ||
+      (error instanceof Error && error.message.includes('Unique constraint'))
+    ) {
       const retryOrder = await prisma.order.findUnique({
         where: { idempotencyKey },
         include: { items: true, payments: true },

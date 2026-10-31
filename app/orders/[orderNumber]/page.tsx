@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ChevronRight, CheckCircle, Clock, Package, Truck, MapPin, Receipt, Copy, Upload, AlertCircle, Check, XCircle } from 'lucide-react';
+import { ChevronRight, CheckCircle, Clock, Package, Truck, MapPin, Receipt, Copy, Upload, AlertCircle, Check, XCircle, Printer } from 'lucide-react';
 import { UpiDynamicQr } from '@/components/upi-dynamic-qr';
 import { OrderCancelButton } from '@/components/order-cancel-button';
 import { toast } from 'sonner';
@@ -40,6 +40,7 @@ export default function OrderDetailPage() {
   const [utrNumber, setUtrNumber] = useState('');
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchOrder = useCallback(async () => {
@@ -130,6 +131,82 @@ export default function OrderDetailPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to submit payment details. Please try again.');
     }
     setUploading(false);
+  };
+
+  const fetchInvoicePdf = async () => {
+    if (!order) throw new Error('Order details are unavailable.');
+    const response = await fetch(
+      `/api/orders/${encodeURIComponent(order.order_number)}/invoice`,
+      { cache: 'no-store' }
+    );
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => null);
+      const message = typeof payload === 'object' && payload !== null &&
+        'error' in payload && typeof payload.error === 'string'
+        ? payload.error
+        : 'Invoice could not be generated. Please try again.';
+      throw new Error(message);
+    }
+    return response.blob();
+  };
+
+  const downloadInvoice = async () => {
+    if (!order) return;
+    setInvoiceLoading(true);
+    try {
+      const blob = await fetchInvoicePdf();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `invoice-${order.order_number.replace(/[^A-Z0-9-]/gi, '')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      console.error('Invoice download failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Invoice could not be generated.');
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  const printInvoice = async () => {
+    if (!order) return;
+    const printWindow = window.open('about:blank', '_blank');
+    if (!printWindow) {
+      toast.error('Allow pop-ups to open the invoice for printing.');
+      return;
+    }
+
+    setInvoiceLoading(true);
+    try {
+      const blob = await fetchInvoicePdf();
+      const url = URL.createObjectURL(blob);
+      printWindow.document.title = `Invoice ${order.order_number}`;
+      printWindow.document.documentElement.style.height = '100%';
+      printWindow.document.body.style.margin = '0';
+
+      const frame = printWindow.document.createElement('iframe');
+      frame.title = `Invoice ${order.order_number}`;
+      frame.style.border = '0';
+      frame.style.display = 'block';
+      frame.style.height = '100%';
+      frame.style.width = '100%';
+      frame.src = url;
+      frame.addEventListener('load', () => {
+        printWindow.focus();
+        printWindow.print();
+      }, { once: true });
+      printWindow.document.body.appendChild(frame);
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      printWindow.close();
+      console.error('Invoice print failed:', error instanceof Error ? error.message : 'Unknown error');
+      toast.error(error instanceof Error ? error.message : 'Invoice could not be generated.');
+    } finally {
+      setInvoiceLoading(false);
+    }
   };
 
   if (loading) {
@@ -438,9 +515,14 @@ export default function OrderDetailPage() {
             </div>
           )}
 
-          <Button variant="outline" className="w-full" onClick={() => window.print()}>
-            <Receipt className="h-4 w-4 mr-2" /> Download Invoice
-          </Button>
+          <div className="space-y-2">
+            <Button variant="outline" className="w-full" onClick={downloadInvoice} disabled={invoiceLoading}>
+              <Receipt className="h-4 w-4 mr-2" /> Download Invoice
+            </Button>
+            <Button variant="outline" className="w-full" onClick={printInvoice} disabled={invoiceLoading}>
+              <Printer className="h-4 w-4 mr-2" /> Print Invoice
+            </Button>
+          </div>
         </div>
       </div>
     </div>
