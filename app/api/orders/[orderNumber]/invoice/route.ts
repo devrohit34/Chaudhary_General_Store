@@ -9,14 +9,42 @@ export const runtime = 'nodejs';
 
 function getErrorDiagnostics(error: unknown) {
   const errorType = error instanceof Error ? error.name : typeof error;
-  const errorCode = typeof error === 'object' && error !== null && 'code' in error &&
-    typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code)
-    ? error.code
-    : undefined;
 
-  return { errorType, ...(errorCode ? { errorCode } : {}) };
+  const errorCode =
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    /^[A-Z0-9_]+$/.test(error.code)
+      ? error.code
+      : undefined;
+
+  const errorMessage =
+    error instanceof Error
+      ? error.message.slice(0, 300)
+      : 'Unknown error';
+
+  const cause =
+    error instanceof Error && error.cause instanceof Error
+      ? {
+          causeType: error.cause.name,
+          causeCode:
+            'code' in error.cause &&
+            typeof error.cause.code === 'string' &&
+            /^[A-Z0-9_]+$/.test(error.cause.code)
+              ? error.cause.code
+              : undefined,
+          causeMessage: error.cause.message.slice(0, 300),
+        }
+      : undefined;
+
+  return {
+    errorType,
+    ...(errorCode ? { errorCode } : {}),
+    errorMessage,
+    ...(cause ? { cause } : {}),
+  };
 }
-
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ orderNumber: string }> }
