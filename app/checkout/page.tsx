@@ -1,16 +1,16 @@
 'use client';
 
 import Image from 'next/image';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useCart } from '@/lib/cart-context';
+import { formatDeliverySlot, getAvailableDeliverySlots, isValidDeliverySlot } from '@/lib/delivery-schedule';
 import { calculateOrderAmounts, rupeesToPaise } from '@/lib/money';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Truck, MapPin, CreditCard, Zap, Check, ChevronRight, ShieldCheck } from 'lucide-react';
+import { Truck, MapPin, CreditCard, Zap, Check, ChevronRight, ShieldCheck, Clock } from 'lucide-react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
@@ -70,15 +70,6 @@ function errorDescription(value: unknown) {
   return value.error.description;
 }
 
-const deliverySlots = [
-  'Express - 30 mins (₹20 extra)',
-  'Today 6-8 PM',
-  'Today 8-10 PM',
-  'Tomorrow 6-8 AM',
-  'Tomorrow 8-10 AM',
-  'Tomorrow 10-12 PM',
-];
-
 export default function CheckoutPage() {
   const { items, subtotal, clearCart } = useCart();
   const router = useRouter();
@@ -87,19 +78,39 @@ export default function CheckoutPage() {
   const [address, setAddress] = useState({
     full_name: '', phone: '', address_line1: '', address_line2: '', city: '', state: '', pincode: '',
   });
-  const [deliverySlot, setDeliverySlot] = useState(deliverySlots[0]);
-  const [isExpress, setIsExpress] = useState(true);
+  const [deliverySlot, setDeliverySlot] = useState('');
+  const [isExpress, setIsExpress] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [placing, setPlacing] = useState(false);
+  const [scheduleTime, setScheduleTime] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setScheduleTime(new Date()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const amounts = calculateOrderAmounts(rupeesToPaise(subtotal), isExpress);
   const deliveryCharge = amounts.standardDeliveryChargePaise / 100;
   const expressCharge = amounts.expressDeliveryChargePaise / 100;
   const total = amounts.totalPaise / 100;
+  const availableSlots = getAvailableDeliverySlots(scheduleTime);
+  const selectedSlot = availableSlots.find((slot) => slot.value === deliverySlot);
+  const slotsByDate = availableSlots.reduce<Map<string, typeof availableSlots>>((groups, slot) => {
+    const dateSlots = groups.get(slot.dateKey) ?? [];
+    dateSlots.push(slot);
+    groups.set(slot.dateKey, dateSlots);
+    return groups;
+  }, new Map());
 
 
   const placeOrder = async () => {
     if (items.length === 0) return;
+    if (!isExpress && !isValidDeliverySlot(deliverySlot)) {
+      setDeliverySlot('');
+      setStep(2);
+      toast.error('That delivery slot is no longer available. Please choose another one.');
+      return;
+    }
     setPlacing(true);
     try {
       const idempotencyKey = checkoutKey.current || window.crypto.randomUUID();
@@ -126,7 +137,7 @@ export default function CheckoutPage() {
           headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
           body: JSON.stringify({
             address,
-            deliverySlot,
+            deliverySlot: isExpress ? '' : deliverySlot,
             isExpress,
             items: items.map((item) => ({ product_id: item.product_id, quantity: item.quantity })),
           }),
@@ -200,7 +211,7 @@ export default function CheckoutPage() {
         },
         body: JSON.stringify({
           address,
-          deliverySlot,
+          deliverySlot: isExpress ? '' : deliverySlot,
           isExpress,
           paymentMethod,
           items: items.map((item) => ({ product_id: item.product_id, quantity: item.quantity })),
@@ -290,30 +301,77 @@ export default function CheckoutPage() {
                 <CardTitle className="flex items-center gap-2"><Truck className="h-5 w-5 text-primary" /> Delivery Options</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between border rounded-lg p-4">
-                  <div className="flex items-center gap-3">
-                    <Zap className="h-6 w-6 text-accent" />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    aria-pressed={!isExpress}
+                    onClick={() => setIsExpress(false)}
+                    className={`rounded-lg border p-4 text-left transition-colors ${!isExpress ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:border-primary/40'}`}
+                  >
+                    <span className="flex items-center gap-2 font-semibold">
+                      <Truck className="h-5 w-5 text-primary" /> Standard Delivery
+                    </span>
+                    <span className="mt-1 block text-sm text-muted-foreground">Same day / next day · choose a delivery slot</span>
+                    <span className="mt-2 block text-sm font-medium">₹{deliveryCharge.toFixed(2)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={isExpress}
+                    onClick={() => setIsExpress(true)}
+                    className={`rounded-lg border p-4 text-left transition-colors ${isExpress ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'hover:border-primary/40'}`}
+                  >
+                    <span className="flex items-center gap-2 font-semibold">
+                      <Zap className="h-5 w-5 text-accent" /> Express Delivery
+                    </span>
+                    <span className="mt-1 block text-sm text-muted-foreground">Approximately 30 minutes</span>
+                    <span className="mt-2 block text-sm font-medium">₹{(deliveryCharge + expressCharge).toFixed(2)} total delivery</span>
+                  </button>
+                </div>
+                {isExpress ? (
+                  <div className="rounded-lg border bg-muted/40 p-4 text-sm">
+                    <p className="flex items-center gap-2 font-medium"><Clock className="h-4 w-4" /> Estimated arrival: approximately 30 minutes</p>
+                    <p className="mt-1 text-muted-foreground">Express service depends on your delivery location and operational conditions. The store will confirm availability.</p>
+                    <p className="mt-2 text-muted-foreground">Standard charge ₹{deliveryCharge.toFixed(2)} + express surcharge ₹{expressCharge.toFixed(2)}.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
                     <div>
-                      <div className="font-medium">Express Delivery</div>
-                      <div className="text-sm text-muted-foreground">Get it in 30 minutes</div>
+                      <Label className="mb-2 block">Choose an available standard delivery slot</Label>
+                      {slotsByDate.size === 0 ? (
+                        <p className="rounded-lg border p-4 text-sm text-muted-foreground">No future delivery slots are currently available. Please try again later.</p>
+                      ) : (
+                        <div className="space-y-4">
+                          {[...slotsByDate.entries()].map(([dateKey, slots]) => (
+                            <fieldset key={dateKey} className="space-y-2">
+                              <legend className="text-sm font-semibold">{slots[0].dateLabel}</legend>
+                              <RadioGroup value={selectedSlot?.value ?? ''} onValueChange={setDeliverySlot}>
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  {slots.map((slot) => (
+                                    <Label
+                                      key={slot.value}
+                                      htmlFor={`delivery-slot-${slot.value}`}
+                                      className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 font-normal ${deliverySlot === slot.value ? 'border-primary bg-primary/5' : 'hover:border-primary/40'}`}
+                                    >
+                                      <RadioGroupItem id={`delivery-slot-${slot.value}`} value={slot.value} />
+                                      <span className="flex-1">{slot.timeLabel}</span>
+                                      {deliverySlot === slot.value && <Check className="h-4 w-4 text-primary" />}
+                                    </Label>
+                                  ))}
+                                </div>
+                              </RadioGroup>
+                            </fieldset>
+                          ))}
+                        </div>
+                      )}
+                      <p className="mt-2 text-xs text-muted-foreground">Only the currently configured Today/Tomorrow windows are shown. Later operating hours and live booking capacity are not configured.</p>
                     </div>
                   </div>
-                  <Checkbox checked={isExpress} onCheckedChange={(v) => setIsExpress(!!v)} />
-                </div>
-                <div>
-                  <Label className="mb-2 block">Select Delivery Slot</Label>
-                  <RadioGroup value={deliverySlot} onValueChange={setDeliverySlot}>
-                    {deliverySlots.map((slot) => (
-                      <div key={slot} className="flex items-center gap-2 border rounded-lg p-3">
-                        <RadioGroupItem value={slot} id={slot} />
-                        <Label htmlFor={slot} className="font-normal cursor-pointer flex-1">{slot}</Label>
-                      </div>
-                    ))}
-                  </RadioGroup>
-                </div>
+                )}
                 <div className="flex gap-3">
                   <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
-                  <Button onClick={() => setStep(3)} className="flex-1">Continue to Payment</Button>
+                  <Button onClick={() => setStep(3)} className="flex-1" disabled={!isExpress && !selectedSlot}>
+                    Continue to Payment
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -388,8 +446,25 @@ export default function CheckoutPage() {
               ))}
               <div className="border-t pt-3 space-y-2">
                 <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span>₹{(amounts.subtotalPaise / 100).toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Standard delivery</span><span>₹{deliveryCharge.toFixed(2)}</span></div>
-                {isExpress && <div className="flex justify-between text-sm"><span className="text-muted-foreground">Express surcharge</span><span>₹{expressCharge.toFixed(2)}</span></div>}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Delivery type</span>
+                  <span>{isExpress ? 'Express Delivery' : 'Standard Delivery'}</span>
+                </div>
+                {isExpress ? (
+                  <>
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Estimated arrival</span><span>Approximately 30 minutes</span></div>
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Standard delivery</span><span>₹{deliveryCharge.toFixed(2)}</span></div>
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Express surcharge</span><span>₹{expressCharge.toFixed(2)}</span></div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between gap-3 text-sm">
+                      <span className="text-muted-foreground">Selected slot</span>
+                      <span className="text-right">{selectedSlot ? `${selectedSlot.dateLabel}, ${selectedSlot.timeLabel}` : 'Choose a slot'}</span>
+                    </div>
+                    <div className="flex justify-between text-sm"><span className="text-muted-foreground">Delivery charge</span><span>₹{deliveryCharge.toFixed(2)}</span></div>
+                  </>
+                )}
                 <div className="border-t pt-2 flex justify-between font-bold"><span>Total</span><span>₹{total.toFixed(2)}</span></div>
               </div>
             </CardContent>

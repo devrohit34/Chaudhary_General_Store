@@ -16,7 +16,7 @@ const checkoutInput = {
     state: 'Delhi',
     pincode: '110001',
   },
-  deliverySlot: '10:00-12:00',
+  deliverySlot: '2026-11-03|morning-0600',
   isExpress: false,
   items: [{ product_id: 'product-1', quantity: 2 }],
 };
@@ -148,6 +148,7 @@ describe('checkout order creation', () => {
         customerEmail: 'customer@example.com',
         orderNumber: expect.stringMatching(/^CGS/),
         idempotencyKey: 'checkout-key',
+        deliverySlot: '2026-11-03|morning-0600',
         deliveryChargePaise: 3900,
         totalPaise: 8900,
         items: { createMany: { data: [expect.objectContaining({ productId: 'product-1', quantity: 2 })] } },

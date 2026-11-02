@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getPrisma } from '@/lib/prisma';
-import { checkoutSchema } from '@/lib/checkout-validation';
+import { checkoutSchemaBase, validateDeliverySelection } from '@/lib/checkout-validation';
 import { createCheckoutOrder, CheckoutError } from '@/lib/order-service';
 import { getCustomerSession } from '@/lib/customer-session';
 import { toOrderDto } from '@/lib/prisma-dto';
 import { orderAccessCookie } from '@/lib/order-access';
 import { hasSameOrigin } from '@/lib/request-security';
 
-const requestSchema = checkoutSchema.extend({
+const requestSchema = checkoutSchemaBase.extend({
   paymentMethod: z.enum(['cod', 'upi', 'phonepe', 'googlepay', 'paytm']),
-});
+}).superRefine(validateDeliverySelection);
 
 export async function POST(request: Request) {
   if (!hasSameOrigin(request)) return NextResponse.json({ error: 'Invalid request origin.' }, { status: 403 });

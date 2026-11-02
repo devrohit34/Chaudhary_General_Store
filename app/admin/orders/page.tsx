@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useEffect, useState, useCallback } from 'react';
 import type { Order, OrderItem } from '@/lib/store-types';
+import { formatDeliverySlot } from '@/lib/delivery-schedule';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -600,21 +601,27 @@ export default function AdminOrdersPage() {
                         </div>
                       </div>
 
-                      {selectedOrder.delivery_slot && (
-                        <div className="border-t pt-3">
+                      <div className="border-t pt-3">
+                        <div>
                           <p className="text-sm">
                             <Calendar className="h-4 w-4 inline mr-1 text-green-600" />
-                            <span className="text-gray-500">Delivery Slot:</span>{' '}
-                            <span className="font-medium">{selectedOrder.delivery_slot}</span>
+                            <span className="text-gray-500">Delivery:</span>{' '}
+                            <span className="font-medium">
+                              {selectedOrder.is_express
+                                ? 'Express · approximately 30 minutes'
+                                : selectedOrder.delivery_slot
+                                  ? `Standard · ${formatDeliverySlot(selectedOrder.delivery_slot)}`
+                                  : 'Standard'}
+                            </span>
                           </p>
-                          {selectedOrder.delivery_otp && (
-                            <p className="text-sm mt-2">
-                              <span className="text-gray-500">Delivery OTP:</span>{' '}
-                              <span className="font-mono font-bold text-lg text-green-600">{selectedOrder.delivery_otp}</span>
-                            </p>
-                          )}
                         </div>
-                      )}
+                        {selectedOrder.delivery_otp && (
+                          <p className="text-sm mt-2">
+                            <span className="text-gray-500">Delivery OTP:</span>{' '}
+                            <span className="font-mono font-bold text-lg text-green-600">{selectedOrder.delivery_otp}</span>
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </TabsContent>
 

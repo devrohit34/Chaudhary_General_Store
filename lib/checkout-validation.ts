@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isValidDeliverySlot } from '@/lib/delivery-schedule';
 
 export const addressSchema = z.object({
   full_name: z.string().trim().min(2).max(120),
@@ -11,7 +12,7 @@ export const addressSchema = z.object({
   landmark: z.string().trim().max(160).optional(),
 });
 
-export const checkoutSchema = z.object({
+export const checkoutSchemaBase = z.object({
   address: addressSchema,
   deliverySlot: z.string().trim().max(120).optional().default(''),
   isExpress: z.boolean().default(false),
@@ -20,5 +21,20 @@ export const checkoutSchema = z.object({
     quantity: z.number().int().min(1).max(100),
   })).min(1).max(50),
 });
+
+export function validateDeliverySelection(
+  checkout: { isExpress: boolean; deliverySlot: string },
+  context: z.RefinementCtx
+) {
+  if (!checkout.isExpress && !isValidDeliverySlot(checkout.deliverySlot)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['deliverySlot'],
+      message: 'Choose an available standard delivery slot.',
+    });
+  }
+}
+
+export const checkoutSchema = checkoutSchemaBase.superRefine(validateDeliverySelection);
 
 export type CheckoutInput = z.infer<typeof checkoutSchema>;

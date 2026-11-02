@@ -18,6 +18,7 @@ vi.mock('@/lib/request-security', () => ({ hasSameOrigin: vi.fn(() => true) }));
 
 import { getPrisma } from '@/lib/prisma';
 import { createCheckoutOrder } from '@/lib/order-service';
+import { getAvailableDeliverySlots } from '@/lib/delivery-schedule';
 import { POST } from './route';
 
 afterEach(() => {
@@ -62,7 +63,7 @@ describe('Razorpay order creation route', () => {
           state: 'Delhi',
           pincode: '110001',
         },
-        deliverySlot: '10:00-12:00',
+        deliverySlot: getAvailableDeliverySlots()[0].value,
         isExpress: false,
         items: [{ product_id: 'product-1', quantity: 2 }],
       }),

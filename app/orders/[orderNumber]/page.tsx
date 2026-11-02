@@ -5,6 +5,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import type { Order } from '@/lib/store-types';
+import { formatDeliverySlot } from '@/lib/delivery-schedule';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -276,11 +277,17 @@ export default function OrderDetailPage() {
               </div>
             </div>
 
-            {order.is_express && (
-              <div className="mt-4 flex items-center gap-2 bg-accent/10 text-accent rounded-lg p-3 text-sm">
-                <Truck className="h-4 w-4" /> Express Delivery · {order.delivery_slot}
+            <div className="mt-4 flex items-start gap-2 bg-accent/10 text-accent rounded-lg p-3 text-sm">
+              <Truck className="h-4 w-4 mt-0.5" />
+              <div>
+                <p className="font-medium">{order.is_express ? 'Express Delivery' : 'Standard Delivery'}</p>
+                {order.is_express ? (
+                  <p>Estimated arrival: approximately 30 minutes</p>
+                ) : order.delivery_slot ? (
+                  <p>Selected slot: {formatDeliverySlot(order.delivery_slot)}</p>
+                ) : null}
               </div>
-            )}
+            </div>
           </div>
 
           {order.status === 'cancelled' && (

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Order } from '@/lib/store-types';
+import { formatDeliverySlot } from '@/lib/delivery-schedule';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -167,7 +168,9 @@ export default function DeliveryPage() {
 
                     <div className="flex items-center gap-4 text-xs text-gray-400">
                       <span>{new Date(order.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
-                      {order.delivery_slot && <span>Slot: {order.delivery_slot}</span>}
+                      {order.is_express
+                        ? <span>Express · approximately 30 minutes</span>
+                        : order.delivery_slot && <span>Slot: {formatDeliverySlot(order.delivery_slot)}</span>}
                       <span className="font-semibold text-gray-700">₹{order.total_amount}</span>
                     </div>
 
