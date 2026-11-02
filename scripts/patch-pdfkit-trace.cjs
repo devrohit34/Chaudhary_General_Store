@@ -23,18 +23,35 @@ if (!fs.existsSync(fontsDir)) {
   process.exit(1);
 }
 
-const trace = JSON.parse(fs.readFileSync(traceFile, 'utf8'));
+// Recursively collect files, including nested chunks folders.
+function getFilesRecursively(directory) {
+  const files = [];
 
-const fontFiles = fs.readdirSync(fontsDir, {
-  withFileTypes: true,
-})
-  .filter((entry) => entry.isFile())
-  .map((entry) =>
-    path.relative(
-      path.dirname(traceFile),
-      path.join(fontsDir, entry.name)
-    ).split(path.sep).join('/')
-  );
+  for (const entry of fs.readdirSync(directory, {
+    withFileTypes: true,
+  })) {
+    const fullPath = path.join(directory, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...getFilesRecursively(fullPath));
+    } else if (entry.isFile()) {
+      files.push(
+        path.relative(
+          path.dirname(traceFile),
+          fullPath
+        ).split(path.sep).join('/')
+      );
+    }
+  }
+
+  return files;
+}
+
+const trace = JSON.parse(
+  fs.readFileSync(traceFile, 'utf8')
+);
+
+const fontFiles = getFilesRecursively(fontsDir);
 
 trace.files = [
   ...new Set([
@@ -48,8 +65,23 @@ fs.writeFileSync(
   JSON.stringify(trace, null, 2)
 );
 
-console.log('PDFKit font files added to invoice trace:', fontFiles.length);
-console.log(
-  'Helvetica included:',
-  trace.files.some((file) => file.includes('Helvetica.cjs'))
+const glyphChunk = fontFiles.find((file) =>
+  file.includes('/chunks/standardGlyphNames-')
 );
+
+const missingFiles = fontFiles.filter((file) =>
+  !fs.existsSync(
+    path.resolve(path.dirname(traceFile), file)
+  )
+);
+
+console.log('PDFKit font files added:', fontFiles.length);
+console.log('Nested glyph chunk included:', Boolean(glyphChunk));
+console.log('Missing local files:', missingFiles.length);
+
+if (!glyphChunk || missingFiles.length > 0) {
+  console.error('PDFKit trace verification failed.');
+  process.exit(1);
+}
+
+console.log('PDFKit trace verification: PASS');
