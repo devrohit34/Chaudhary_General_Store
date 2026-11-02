@@ -1,8 +1,9 @@
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ['pdfkit', '@vercel/blob'],
-
+ experimental: {
+  serverComponentsExternalPackages: ['pdfkit', '@vercel/blob'],
+},
   eslint: {
     ignoreDuringBuilds: true,
   },
