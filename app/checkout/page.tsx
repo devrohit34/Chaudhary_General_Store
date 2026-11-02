@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useRef, useState } from 'react';
 import { useCart } from '@/lib/cart-context';
+import { calculateOrderAmounts, rupeesToPaise } from '@/lib/money';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -91,9 +92,10 @@ export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [placing, setPlacing] = useState(false);
 
-  const deliveryCharge = subtotal >= 999 ? 0 : 1;
-  const expressCharge = isExpress ? 20 : 0;
-  const total = subtotal + deliveryCharge + expressCharge;
+  const amounts = calculateOrderAmounts(rupeesToPaise(subtotal), isExpress);
+  const deliveryCharge = amounts.standardDeliveryChargePaise / 100;
+  const expressCharge = amounts.expressDeliveryChargePaise / 100;
+  const total = amounts.totalPaise / 100;
 
 
   const placeOrder = async () => {
@@ -357,7 +359,7 @@ export default function CheckoutPage() {
                 <div className="flex gap-3">
                   <Button variant="outline" onClick={() => setStep(2)}>Back</Button>
                   <Button onClick={placeOrder} className="flex-1" disabled={placing}>
-                    {placing ? 'Placing Order...' : `Place Order · ₹${total.toFixed(0)}`}
+                    {placing ? 'Placing Order...' : `Place Order · ₹${total.toFixed(2)}`}
                   </Button>
                 </div>
               </CardContent>
@@ -385,10 +387,10 @@ export default function CheckoutPage() {
                 </div>
               ))}
               <div className="border-t pt-3 space-y-2">
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span>₹{subtotal}</span></div>
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Delivery</span><span>{deliveryCharge === 0 ? 'FREE' : `₹${deliveryCharge}`}</span></div>
-                {isExpress && <div className="flex justify-between text-sm"><span className="text-muted-foreground">Express</span><span>₹{expressCharge}</span></div>}
-                <div className="border-t pt-2 flex justify-between font-bold"><span>Total</span><span>₹{total.toFixed(0)}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span>₹{(amounts.subtotalPaise / 100).toFixed(2)}</span></div>
+                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Standard delivery</span><span>₹{deliveryCharge.toFixed(2)}</span></div>
+                {isExpress && <div className="flex justify-between text-sm"><span className="text-muted-foreground">Express surcharge</span><span>₹{expressCharge.toFixed(2)}</span></div>}
+                <div className="border-t pt-2 flex justify-between font-bold"><span>Total</span><span>₹{total.toFixed(2)}</span></div>
               </div>
             </CardContent>
           </Card>

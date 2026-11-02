@@ -148,7 +148,8 @@ describe('checkout order creation', () => {
         customerEmail: 'customer@example.com',
         orderNumber: expect.stringMatching(/^CGS/),
         idempotencyKey: 'checkout-key',
-        totalPaise: 5100,
+        deliveryChargePaise: 3900,
+        totalPaise: 8900,
         items: { createMany: { data: [expect.objectContaining({ productId: 'product-1', quantity: 2 })] } },
       }),
       include: { items: true, payments: true },
@@ -174,12 +175,30 @@ describe('checkout order creation', () => {
           create: {
             gateway: 'razorpay',
             status: 'pending',
-            amountPaise: 5100,
+            amountPaise: 8900,
           },
         },
       }),
     }));
     expect(transaction.$queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it('includes the standard delivery charge and express surcharge in the saved order total', async () => {
+    vi.stubEnv('ORDER_ACCESS_SECRET', 'test-order-access-secret-with-32-chars');
+    const { transaction } = setupPrisma();
+
+    await createCheckoutOrder(
+      { ...checkoutInput, isExpress: true },
+      'cod',
+      'express-delivery-key'
+    );
+
+    expect(transaction.order.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        deliveryChargePaise: 5900,
+        totalPaise: 10900,
+      }),
+    }));
   });
 
   it('reserves inventory with one bulk conditional update for a full 50-product cart', async () => {

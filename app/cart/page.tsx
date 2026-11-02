@@ -4,14 +4,16 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCart } from '@/lib/cart-context';
+import { calculateOrderAmounts, rupeesToPaise } from '@/lib/money';
 import { Button } from '@/components/ui/button';
 import { Minus, Plus, Trash2, ShoppingCart, ChevronRight } from 'lucide-react';
 
 export default function CartPage() {
   const router = useRouter();
   const { items, updateQuantity, removeItem, subtotal, totalItems } = useCart();
-  const deliveryCharge = subtotal >= 999 ? 0 : 1;
-  const total = subtotal + deliveryCharge;
+  const amounts = calculateOrderAmounts(rupeesToPaise(subtotal), false);
+  const deliveryCharge = amounts.standardDeliveryChargePaise / 100;
+  const total = amounts.totalPaise / 100;
 
   if (items.length === 0) {
     return (
@@ -81,15 +83,15 @@ export default function CartPage() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Subtotal</span>
-                <span>₹{subtotal}</span>
+                <span>₹{(amounts.subtotalPaise / 100).toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Delivery</span>
-                <span>{deliveryCharge === 0 ? 'FREE' : `₹${deliveryCharge}`}</span>
+                <span className="text-muted-foreground">Standard delivery</span>
+                <span>₹{deliveryCharge.toFixed(2)}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-bold text-base">
                 <span>Total</span>
-                <span>₹{total.toFixed(0)}</span>
+                <span>₹{total.toFixed(2)}</span>
               </div>
             </div>
             <Button className="w-full" size="lg" onClick={() => router.push('/checkout')}>

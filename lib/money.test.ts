@@ -6,22 +6,36 @@ describe('money helpers', () => {
     expect(rupeesToPaise(19.99)).toBe(1999);
   });
 
-  it('applies the free-delivery threshold and express fee', () => {
-    expect(calculateOrderAmounts(99_900, false)).toEqual({
-      subtotalPaise: 99_900,
-      deliveryChargePaise: 0,
-      totalPaise: 99_900,
-    });
-    expect(calculateOrderAmounts(99_899, true)).toEqual({
-      subtotalPaise: 99_899,
-      deliveryChargePaise: 2_100,
-      totalPaise: 101_999,
-    });
-    expect(calculateOrderAmounts(99_899, false)).toEqual({
-      subtotalPaise: 99_899,
-      deliveryChargePaise: 100,
-      totalPaise: 99_999,
-    });
+  it('applies standard and express delivery charges at each pricing boundary', () => {
+    const cases = [
+      { subtotalRupees: 500, standardRupees: 39 },
+      { subtotalRupees: 900, standardRupees: 39 },
+      { subtotalRupees: 998, standardRupees: 39 },
+      { subtotalRupees: 999, standardRupees: 19 },
+      { subtotalRupees: 1000, standardRupees: 19 },
+      { subtotalRupees: 1500, standardRupees: 19 },
+    ];
+
+    for (const { subtotalRupees, standardRupees } of cases) {
+      const subtotalPaise = rupeesToPaise(subtotalRupees);
+      const standardChargePaise = rupeesToPaise(standardRupees);
+      const expressSurchargePaise = rupeesToPaise(20);
+
+      expect(calculateOrderAmounts(subtotalPaise, false)).toEqual({
+        subtotalPaise,
+        standardDeliveryChargePaise: standardChargePaise,
+        expressDeliveryChargePaise: 0,
+        deliveryChargePaise: standardChargePaise,
+        totalPaise: subtotalPaise + standardChargePaise,
+      });
+      expect(calculateOrderAmounts(subtotalPaise, true)).toEqual({
+        subtotalPaise,
+        standardDeliveryChargePaise: standardChargePaise,
+        expressDeliveryChargePaise: expressSurchargePaise,
+        deliveryChargePaise: standardChargePaise + expressSurchargePaise,
+        totalPaise: subtotalPaise + standardChargePaise + expressSurchargePaise,
+      });
+    }
   });
 
   it('rejects invalid monetary inputs', () => {
