@@ -79,6 +79,19 @@ describe('invoice download authorization', () => {
     expect(generateInvoicePdf).toHaveBeenCalledOnce();
   });
 
+  it('returns not found when the order does not exist', async () => {
+    vi.mocked(getPrisma).mockReturnValue({
+      order: { findUnique: vi.fn().mockResolvedValue(null) },
+    } as never);
+
+    const response = await GET(request(), { params: Promise.resolve({ orderNumber }) });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Invoice is unavailable.' });
+    expect(getCustomerSession).not.toHaveBeenCalled();
+    expect(generateInvoicePdf).not.toHaveBeenCalled();
+  });
+
   it('allows a guest order token and returns a private downloadable PDF', async () => {
     mockOrder(null);
     vi.mocked(getCustomerSession).mockResolvedValue(null);
@@ -94,6 +107,38 @@ describe('invoice download authorization', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(Buffer.from(await response.arrayBuffer()).toString()).toBe('%PDF-test');
     expect(hasOrderAccessToken).toHaveBeenCalledWith('guest-access-token', 'stored-hash');
+  });
+
+  it('returns a generic error with safe correlated diagnostics when PDF generation fails', async () => {
+    mockOrder();
+    vi.mocked(getCustomerSession).mockResolvedValue({ id: 'customer-1', email: 'owner@example.com' });
+    vi.mocked(requestOrderAccessToken).mockReturnValue(null);
+    vi.mocked(hasOrderAccessToken).mockReturnValue(false);
+    vi.mocked(generateInvoicePdf).mockRejectedValue(Object.assign(
+      new Error('private diagnostic detail'),
+      { code: 'ENOENT' }
+    ));
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await GET(request(), { params: Promise.resolve({ orderNumber }) });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: 'Invoice could not be generated. Please try again.',
+    });
+    const correlationId = response.headers.get('x-correlation-id');
+    expect(correlationId).toMatch(/^[0-9a-f-]{36}$/);
+    const diagnostics = JSON.parse(String(logError.mock.calls[0][0]));
+    expect(diagnostics).toMatchObject({
+      event: 'invoice_request_failed',
+      correlationId,
+      stage: 'pdf_generation',
+      errorType: 'Error',
+      errorCode: 'ENOENT',
+    });
+    expect(String(logError.mock.calls[0][0])).not.toContain('private diagnostic detail');
+    expect(String(logError.mock.calls[0][0])).not.toContain(orderNumber);
+    logError.mockRestore();
   });
 
   it('rejects invalid order numbers before accessing the database', async () => {

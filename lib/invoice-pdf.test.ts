@@ -59,6 +59,7 @@ describe('invoice PDF generation', () => {
     }));
 
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(pdf.toString('latin1')).toMatch(/%%EOF\s*$/);
     expect(pdf.length).toBeGreaterThan(1000);
     expect(pageCount(pdf)).toBe(1);
   });
@@ -83,6 +84,7 @@ describe('invoice PDF generation', () => {
     }));
 
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(pdf.toString('latin1')).toMatch(/%%EOF\s*$/);
     expect(pageCount(pdf)).toBe(10);
   });
 

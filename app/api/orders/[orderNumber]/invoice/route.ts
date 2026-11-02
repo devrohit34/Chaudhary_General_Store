@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
 import { getCustomerSession } from '@/lib/customer-session';
@@ -6,10 +7,23 @@ import { generateInvoicePdf } from '@/lib/invoice-pdf';
 
 export const runtime = 'nodejs';
 
+function getErrorDiagnostics(error: unknown) {
+  const errorType = error instanceof Error ? error.name : typeof error;
+  const errorCode = typeof error === 'object' && error !== null && 'code' in error &&
+    typeof error.code === 'string' && /^[A-Z0-9_]+$/.test(error.code)
+    ? error.code
+    : undefined;
+
+  return { errorType, ...(errorCode ? { errorCode } : {}) };
+}
+
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ orderNumber: string }> }
 ) {
+  const correlationId = randomUUID();
+  let stage = 'order_lookup';
+
   try {
     const { orderNumber } = await params;
     if (!/^CGS[A-F0-9]{20}$/.test(orderNumber)) {
@@ -61,6 +75,7 @@ export async function GET(
 
     if (!order) return NextResponse.json({ error: 'Invoice is unavailable.' }, { status: 404 });
 
+    stage = 'authorization';
     const session = await getCustomerSession(request);
     const guestAccessAllowed = hasOrderAccessToken(
       requestOrderAccessToken(request, orderNumber),
@@ -70,6 +85,7 @@ export async function GET(
       return NextResponse.json({ error: 'Invoice is unavailable.' }, { status: 404 });
     }
 
+    stage = 'pdf_generation';
     const pdf = await generateInvoicePdf(order);
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
@@ -80,7 +96,15 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error('Invoice generation failed:', error instanceof Error ? error.message : 'Unknown error');
-    return NextResponse.json({ error: 'Invoice could not be generated. Please try again.' }, { status: 503 });
+    console.error(JSON.stringify({
+      event: 'invoice_request_failed',
+      correlationId,
+      stage,
+      ...getErrorDiagnostics(error),
+    }));
+    return NextResponse.json(
+      { error: 'Invoice could not be generated. Please try again.' },
+      { status: 503, headers: { 'X-Correlation-ID': correlationId } }
+    );
   }
 }
