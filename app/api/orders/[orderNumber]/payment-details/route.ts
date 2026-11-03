@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getPrisma } from '@/lib/prisma';
-import { getCustomerSession } from '@/lib/customer-session';
-import { hasOrderAccessToken, requestOrderAccessToken } from '@/lib/order-access';
+import { canAccessOrder } from '@/lib/order-access';
 import { requireAdmin } from '@/lib/require-admin';
 import { hasSameOrigin } from '@/lib/request-security';
 
@@ -21,12 +20,7 @@ async function getAuthorizedOrder(request: Request, orderNumber: string) {
   const order = await prisma.order.findUnique({ where: { orderNumber } });
   if (!order) return { order: null, response: NextResponse.json({ error: 'Order not found.' }, { status: 404 }) };
 
-  const session = await getCustomerSession(request);
-  const guestAccess = hasOrderAccessToken(
-    requestOrderAccessToken(request, orderNumber),
-    order.guestAccessTokenHash
-  );
-  if (!guestAccess && session?.id !== order.customerId) {
+  if (!await canAccessOrder(request, orderNumber, order)) {
     return { order, response: NextResponse.json({ error: 'Order access is not authorized.' }, { status: 403 }) };
   }
   return { order, response: null };

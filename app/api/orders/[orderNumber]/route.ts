@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { getCustomerSession } from '@/lib/customer-session';
-import { hasOrderAccessToken, requestOrderAccessToken } from '@/lib/order-access';
+import { canAccessOrder } from '@/lib/order-access';
 import { toOrderDto } from '@/lib/prisma-dto';
 
 export async function GET(
@@ -16,9 +15,7 @@ export async function GET(
     });
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
 
-    const customerSession = await getCustomerSession(request);
-    const tokenAllowed = hasOrderAccessToken(requestOrderAccessToken(request, orderNumber), order.guestAccessTokenHash);
-    if (!tokenAllowed && customerSession?.id !== order.customerId) {
+    if (!await canAccessOrder(request, orderNumber, order)) {
       return NextResponse.json({ error: 'Order access is not authorized.' }, { status: 403 });
     }
     return NextResponse.json({ order: toOrderDto(order) });

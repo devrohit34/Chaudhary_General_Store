@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getPrisma } from '@/lib/prisma';
 import { checkoutSchemaBase, validateDeliverySelection } from '@/lib/checkout-validation';
 import { createCheckoutOrder, CheckoutError } from '@/lib/order-service';
-import { getCustomerSession } from '@/lib/customer-session';
+import { getActiveCustomer } from '@/lib/customer-auth';
 import { toOrderDto } from '@/lib/prisma-dto';
 import { orderAccessCookie } from '@/lib/order-access';
 import { hasSameOrigin } from '@/lib/request-security';
@@ -22,15 +22,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    const session = await getCustomerSession(request);
-    const customer = session
-      ? await getPrisma().customer.findUnique({ where: { id: session.id }, select: { id: true, email: true, isActive: true } })
-      : null;
+    const customer = await getActiveCustomer(request);
+    if (!customer) return NextResponse.json({ error: 'Sign in to place an order.' }, { status: 401 });
     const result = await createCheckoutOrder(
       parsed.data,
       parsed.data.paymentMethod,
       idempotencyKey,
-      customer?.isActive ? { id: customer.id, email: customer.email } : undefined
+      customer
     );
     if (result.alreadyExists) {
       return NextResponse.json({ error: 'This checkout request was already submitted.' }, { status: 409 });
@@ -58,13 +56,12 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   try {
-    const session = await getCustomerSession(request);
-    if (!session) return NextResponse.json({ orders: [] });
+    const customer = await getActiveCustomer(request);
+    if (!customer) return NextResponse.json({ error: 'Sign in to view your orders.' }, { status: 401 });
     const orders = await getPrisma().order.findMany({
-      where: { customerId: session.id },
+      where: { customerId: customer.id },
       include: { items: true, refundOperation: true },
       orderBy: { createdAt: 'desc' },
-      take: 50,
     });
     return NextResponse.json({ orders: orders.map(toOrderDto) });
   } catch (error) {

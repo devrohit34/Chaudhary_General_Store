@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useCart } from '@/lib/cart-context';
 import type { CustomerSession } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,7 @@ function readSessionUser(value: unknown): CustomerSession {
 
 export default function AccountPage() {
   const { wishlist, recentlyViewed } = useCart();
+  const router = useRouter();
   const [user, setUser] = useState<CustomerSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState('');
@@ -40,6 +42,12 @@ export default function AccountPage() {
   const [showSignupPassword, setShowSignupPassword] = useState(false);
   const [phone, setPhone] = useState('');
   const [fullName, setFullName] = useState('');
+
+  const continueAfterAuthentication = (payload: unknown) => {
+    setUser(readSessionUser(payload));
+    const destination = new URLSearchParams(window.location.search).get('returnTo');
+    if (destination === '/checkout' || destination === '/orders') router.replace(destination);
+  };
 
   useEffect(() => {
     let active = true;
@@ -50,7 +58,12 @@ export default function AccountPage() {
       })
       .then((payload: unknown) => {
         if (active && typeof payload === 'object' && payload !== null && 'user' in payload) {
-          setUser(payload.user as CustomerSession | null);
+          if (payload.user && typeof payload.user === 'object') {
+            const sessionUser = readSessionUser(payload);
+            setUser(sessionUser);
+            const destination = new URLSearchParams(window.location.search).get('returnTo');
+            if (destination === '/checkout' || destination === '/orders') router.replace(destination);
+          }
         }
       })
       .catch((error: unknown) => {
@@ -61,7 +74,7 @@ export default function AccountPage() {
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, []);
+  }, [router]);
 
   const signUp = async () => {
     try {
@@ -72,7 +85,7 @@ export default function AccountPage() {
       });
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(readApiError(payload) || 'Account creation failed.');
-      setUser(readSessionUser(payload));
+      continueAfterAuthentication(payload);
       toast.success('Account created successfully.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Account creation failed.');
@@ -88,7 +101,7 @@ export default function AccountPage() {
       });
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) throw new Error(readApiError(payload) || 'Sign-in failed.');
-      setUser(readSessionUser(payload));
+      continueAfterAuthentication(payload);
       toast.success('Welcome back!');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Sign-in failed.');
@@ -124,6 +137,12 @@ export default function AccountPage() {
           <h1 className="text-2xl font-bold">Welcome to Chaudhary General Store</h1>
           <p className="text-muted-foreground">चौधरी जेनरल स्टोर · Sign in or create an account</p>
         </div>
+
+        {new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search).get('returnTo') === '/checkout' && (
+          <p className="mb-4 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-center">
+            Sign in or create an account to continue checkout. Your cart will be kept.
+          </p>
+        )}
 
         <Tabs defaultValue="signin">
           <TabsList className="grid w-full grid-cols-2">

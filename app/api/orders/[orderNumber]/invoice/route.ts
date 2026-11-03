@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { getCustomerSession } from '@/lib/customer-session';
-import { hasOrderAccessToken, requestOrderAccessToken } from '@/lib/order-access';
+import { canAccessOrder } from '@/lib/order-access';
 import { generateInvoicePdf } from '@/lib/invoice-pdf';
 
 export const runtime = 'nodejs';
@@ -104,12 +103,7 @@ export async function GET(
     if (!order) return NextResponse.json({ error: 'Invoice is unavailable.' }, { status: 404 });
 
     stage = 'authorization';
-    const session = await getCustomerSession(request);
-    const guestAccessAllowed = hasOrderAccessToken(
-      requestOrderAccessToken(request, orderNumber),
-      order.guestAccessTokenHash
-    );
-    if (!guestAccessAllowed && session?.id !== order.customerId) {
+    if (!await canAccessOrder(request, orderNumber, order)) {
       return NextResponse.json({ error: 'Invoice is unavailable.' }, { status: 404 });
     }
 

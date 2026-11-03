@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { getCustomerSession } from '@/lib/customer-session';
-import { hasOrderAccessToken, requestOrderAccessToken } from '@/lib/order-access';
+import { canAccessOrder } from '@/lib/order-access';
 import { hasSameOrigin } from '@/lib/request-security';
 
 export async function PATCH(
@@ -15,12 +14,7 @@ export async function PATCH(
     const order = await prisma.order.findUnique({ where: { orderNumber } });
     if (!order) return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
 
-    const session = await getCustomerSession(request);
-    const guestAccess = hasOrderAccessToken(
-      requestOrderAccessToken(request, orderNumber),
-      order.guestAccessTokenHash
-    );
-    if (!guestAccess && session?.id !== order.customerId) {
+    if (!await canAccessOrder(request, orderNumber, order)) {
       return NextResponse.json({ error: 'Order access is not authorized.' }, { status: 403 });
     }
     if (

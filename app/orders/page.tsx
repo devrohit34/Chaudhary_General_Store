@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { Order } from '@/lib/store-types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +21,7 @@ const statusConfig: Record<string, { label: string; icon: any; color: string }> 
 };
 
 export default function OrdersPage() {
+  const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,6 +29,10 @@ export default function OrdersPage() {
     async function fetchOrders() {
       try {
         const response = await fetch('/api/orders', { cache: 'no-store' });
+        if (response.status === 401) {
+          router.replace('/account?returnTo=%2Forders');
+          return;
+        }
         if (!response.ok) throw new Error('Orders are temporarily unavailable.');
         const payload: unknown = await response.json();
         if (typeof payload !== 'object' || payload === null || !('orders' in payload) || !Array.isArray(payload.orders)) {
@@ -41,7 +47,7 @@ export default function OrdersPage() {
       }
     }
     fetchOrders();
-  }, []);
+  }, [router]);
 
   return (
     <div className="container mx-auto px-4 py-8 animate-fade-in">

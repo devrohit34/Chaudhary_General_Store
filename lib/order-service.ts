@@ -18,7 +18,7 @@ export async function createCheckoutOrder(
   input: CheckoutInput,
   paymentMethod: PaymentMethod,
   idempotencyKey: string,
-  customer?: { id: string; email: string }
+  customer: { id: string; email: string }
 ) {
   const prisma = getPrisma();
   const existing = await prisma.order.findUnique({
@@ -26,6 +26,9 @@ export async function createCheckoutOrder(
     include: { items: true, payments: true },
   });
   if (existing) {
+    if (existing.customerId !== customer.id) {
+      throw new CheckoutError('This checkout request cannot be reused.', 409);
+    }
     if (existing.paymentStatus === 'failed' || existing.status === 'cancelled') {
       throw new CheckoutError('This checkout attempt has expired. Start a new checkout.', 409);
     }
@@ -125,9 +128,9 @@ export async function createCheckoutOrder(
       return transaction.order.create({
         data: {
           orderNumber,
-          customerId: customer?.id,
+          customerId: customer.id,
           customerName: input.address.full_name,
-          customerEmail: customer?.email,
+          customerEmail: customer.email,
           customerPhone: input.address.phone,
           addressSnapshot: input.address,
           status: 'pending',

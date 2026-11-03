@@ -4,8 +4,7 @@ vi.mock('server-only', () => ({}));
 vi.mock('@/lib/prisma', () => ({ getPrisma: vi.fn() }));
 vi.mock('@/lib/customer-session', () => ({ getCustomerSession: vi.fn() }));
 vi.mock('@/lib/order-access', () => ({
-  hasOrderAccessToken: vi.fn(),
-  requestOrderAccessToken: vi.fn(),
+  canAccessOrder: vi.fn(),
 }));
 vi.mock('@/lib/order-cancellation', () => ({
   cancelOrder: vi.fn(),
@@ -18,7 +17,7 @@ vi.mock('@/lib/prisma-dto', () => ({ toOrderDto: vi.fn((order) => order) }));
 
 import { getPrisma } from '@/lib/prisma';
 import { getCustomerSession } from '@/lib/customer-session';
-import { hasOrderAccessToken } from '@/lib/order-access';
+import { canAccessOrder } from '@/lib/order-access';
 import { cancelOrder } from '@/lib/order-cancellation';
 import { POST } from './route';
 
@@ -46,7 +45,7 @@ describe('customer order cancellation authorization', () => {
       },
     } as never);
     vi.mocked(getCustomerSession).mockResolvedValue({ id: 'different-customer', email: 'other@example.com' });
-    vi.mocked(hasOrderAccessToken).mockReturnValue(false);
+    vi.mocked(canAccessOrder).mockResolvedValue(false);
 
     const response = await POST(request({ reason: 'No longer needed' }), {
       params: Promise.resolve({ orderNumber: 'CGS12345678' }),
@@ -67,7 +66,7 @@ describe('customer order cancellation authorization', () => {
       },
     } as never);
     vi.mocked(getCustomerSession).mockResolvedValue(null);
-    vi.mocked(hasOrderAccessToken).mockReturnValue(false);
+    vi.mocked(canAccessOrder).mockResolvedValue(false);
 
     const response = await POST(request({ reason: 'Ordered by mistake' }), {
       params: Promise.resolve({ orderNumber: 'CGS12345678' }),

@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCart } from '@/lib/cart-context';
 import { formatDeliverySlot, getAvailableDeliverySlots, isValidDeliverySlot } from '@/lib/delivery-schedule';
 import { calculateOrderAmounts, rupeesToPaise } from '@/lib/money';
@@ -36,6 +36,36 @@ type RazorpayOrderResponse = {
   amount: number;
   currency: string;
 };
+
+type CheckoutDraft = {
+  address: CheckoutAddress;
+  deliverySlot: string;
+  isExpress: boolean;
+  paymentMethod: string;
+  step: number;
+  checkoutKey: string | null;
+};
+
+const checkoutDraftKey = 'cgs-checkout-draft';
+
+function isCheckoutDraft(value: unknown): value is CheckoutDraft {
+  if (typeof value !== 'object' || value === null ||
+      !('address' in value) || typeof value.address !== 'object' || value.address === null ||
+      !('deliverySlot' in value) || typeof value.deliverySlot !== 'string' ||
+      !('isExpress' in value) || typeof value.isExpress !== 'boolean' ||
+      !('paymentMethod' in value) || typeof value.paymentMethod !== 'string' ||
+      !('step' in value) || typeof value.step !== 'number' ||
+      !('checkoutKey' in value) ||
+      (value.checkoutKey !== null && (typeof value.checkoutKey !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.checkoutKey)))) {
+    return false;
+  }
+  const address = value.address as Record<string, unknown>;
+  return ['full_name', 'phone', 'address_line1', 'address_line2', 'city', 'state', 'pincode']
+    .every((key) => key in address && typeof address[key] === 'string') &&
+    [1, 2, 3].includes(value.step) &&
+    ['cod', 'razorpay'].includes(value.paymentMethod);
+}
 
 function isRazorpayOrderResponse(value: unknown): value is RazorpayOrderResponse {
   return typeof value === 'object' && value !== null &&
@@ -74,6 +104,8 @@ export default function CheckoutPage() {
   const { items, subtotal, clearCart } = useCart();
   const router = useRouter();
   const checkoutKey = useRef<string | null>(null);
+  const [authStatus, setAuthStatus] = useState<'checking' | 'ready' | 'unavailable'>('checking');
+  const [draftReady, setDraftReady] = useState(false);
   const [step, setStep] = useState(1);
   const [address, setAddress] = useState({
     full_name: '', phone: '', address_line1: '', address_line2: '', city: '', state: '', pincode: '',
@@ -83,6 +115,79 @@ export default function CheckoutPage() {
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [placing, setPlacing] = useState(false);
   const [scheduleTime, setScheduleTime] = useState(() => new Date());
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Account session is unavailable.');
+        return response.json();
+      })
+      .then((payload: unknown) => {
+        if (!active) return;
+        if (typeof payload !== 'object' || payload === null || !('user' in payload)) {
+          throw new Error('Account service returned invalid session data.');
+        }
+        if (!payload.user) {
+          router.replace('/account?returnTo=%2Fcheckout');
+          return;
+        }
+        setAuthStatus('ready');
+      })
+      .catch((error: unknown) => {
+        console.error('Checkout authentication check failed:', error instanceof Error ? error.message : 'Unknown error');
+        if (active) setAuthStatus('unavailable');
+      });
+    return () => { active = false; };
+  }, [router]);
+
+  useEffect(() => {
+    if (authStatus !== 'ready') return;
+    try {
+      const savedDraft = sessionStorage.getItem(checkoutDraftKey);
+      if (savedDraft) {
+        const draft: unknown = JSON.parse(savedDraft);
+        if (isCheckoutDraft(draft)) {
+          setAddress(draft.address);
+          setDeliverySlot(draft.deliverySlot);
+          setIsExpress(draft.isExpress);
+          setPaymentMethod(draft.paymentMethod);
+          setStep(draft.step);
+          checkoutKey.current = draft.checkoutKey;
+        }
+      }
+    } catch (error) {
+      console.error('Checkout draft could not be restored:', error instanceof Error ? error.message : 'Unknown error');
+    }
+    setDraftReady(true);
+  }, [authStatus]);
+
+  const saveCheckoutDraft = useCallback(() => {
+    try {
+      sessionStorage.setItem(checkoutDraftKey, JSON.stringify({
+        address,
+        deliverySlot,
+        isExpress,
+        paymentMethod,
+        step,
+        checkoutKey: checkoutKey.current,
+      }));
+    } catch (error) {
+      console.error('Checkout draft could not be saved:', error instanceof Error ? error.message : 'Unknown error');
+    }
+  }, [address, deliverySlot, isExpress, paymentMethod, step]);
+
+  const clearCheckoutDraft = () => {
+    try {
+      sessionStorage.removeItem(checkoutDraftKey);
+    } catch (error) {
+      console.error('Checkout draft could not be cleared:', error instanceof Error ? error.message : 'Unknown error');
+    }
+  };
+
+  useEffect(() => {
+    if (authStatus === 'ready' && draftReady) saveCheckoutDraft();
+  }, [authStatus, draftReady, saveCheckoutDraft]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setScheduleTime(new Date()), 30_000);
@@ -115,6 +220,7 @@ export default function CheckoutPage() {
     try {
       const idempotencyKey = checkoutKey.current || window.crypto.randomUUID();
       checkoutKey.current = idempotencyKey;
+      saveCheckoutDraft();
       if (paymentMethod === 'razorpay') {
         const scriptLoaded = await new Promise<boolean>((resolve) => {
           if (window.Razorpay) return resolve(true);
@@ -143,8 +249,15 @@ export default function CheckoutPage() {
           }),
         });
         const createdPayload: unknown = await createResponse.json().catch(() => null);
+        if (createResponse.status === 401) {
+          saveCheckoutDraft();
+          setPlacing(false);
+          router.replace('/account?returnTo=%2Fcheckout');
+          return;
+        }
         if (!createResponse.ok) {
           checkoutKey.current = null;
+          saveCheckoutDraft();
           throw new Error(apiError(createdPayload) || 'Unable to start payment.');
         }
         if (!isRazorpayOrderResponse(createdPayload)) throw new Error('The payment service returned an invalid response.');
@@ -179,11 +292,13 @@ export default function CheckoutPage() {
               if (!verifyResponse.ok || !verified) throw new Error(apiError(verifiedPayload) || 'Payment verification is pending.');
               clearCart();
               checkoutKey.current = null;
+              clearCheckoutDraft();
               toast.success('Payment verified! Your order is confirmed.');
               router.push(`/orders/${created.orderNumber}`);
             } catch (verifyError) {
               clearCart();
               checkoutKey.current = null;
+              clearCheckoutDraft();
               console.error('Razorpay verification failed', verifyError);
               toast.error('Payment received but verification is pending. Please do not pay again; refresh your order page shortly.');
               router.push(`/orders/${created.orderNumber}`);
@@ -218,6 +333,12 @@ export default function CheckoutPage() {
         }),
       });
       const payload: unknown = await response.json().catch(() => null);
+      if (response.status === 401) {
+        saveCheckoutDraft();
+        setPlacing(false);
+        router.replace('/account?returnTo=%2Fcheckout');
+        return;
+      }
       if (!response.ok) throw new Error(apiError(payload) || 'Could not place your order.');
       if (typeof payload !== 'object' || payload === null || !('order' in payload) ||
           typeof payload.order !== 'object' || payload.order === null ||
@@ -227,6 +348,7 @@ export default function CheckoutPage() {
 
       clearCart();
       checkoutKey.current = null;
+      clearCheckoutDraft();
       toast.success('Order placed successfully!');
       router.push(`/orders/${payload.order.order_number}`);
     } catch (err) {
@@ -235,6 +357,21 @@ export default function CheckoutPage() {
       setPlacing(false);
     }
   };
+
+  if (authStatus !== 'ready') {
+    return (
+      <div className="container mx-auto px-4 py-16 text-center">
+        {authStatus === 'checking' ? (
+          <div className="mx-auto h-32 max-w-md rounded-xl shimmer" />
+        ) : (
+          <>
+            <p className="mb-4 text-muted-foreground">Checkout is unavailable until your account session can be verified.</p>
+            <Button onClick={() => window.location.reload()}>Try Again</Button>
+          </>
+        )}
+      </div>
+    );
+  }
 
   if (items.length === 0) {
     return (

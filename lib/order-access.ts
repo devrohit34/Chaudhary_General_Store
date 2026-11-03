@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'crypto';
+import { getCustomerSession } from '@/lib/customer-session';
 
 function accessSecret() {
   const secret = process.env.ORDER_ACCESS_SECRET;
@@ -43,6 +44,17 @@ export function hasOrderAccessToken(token: string | null, tokenHash: string | nu
   const actual = Buffer.from(hashOrderAccessToken(token), 'hex');
   const expected = Buffer.from(tokenHash, 'hex');
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+export async function canAccessOrder(
+  request: Request,
+  orderNumber: string,
+  order: { customerId: string | null; guestAccessTokenHash: string | null }
+) {
+  const session = await getCustomerSession(request);
+  if (session) return session.id === order.customerId;
+  return order.customerId === null &&
+    hasOrderAccessToken(requestOrderAccessToken(request, orderNumber), order.guestAccessTokenHash);
 }
 
 export function createOrderNumber() {

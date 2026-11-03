@@ -9,7 +9,7 @@ import {
   CheckoutError,
   releaseOrderInventory,
 } from '@/lib/order-service';
-import { getCustomerSession } from '@/lib/customer-session';
+import { getActiveCustomer } from '@/lib/customer-auth';
 import { orderAccessCookie } from '@/lib/order-access';
 import { hasSameOrigin } from '@/lib/request-security';
 
@@ -53,26 +53,16 @@ export async function POST(request: Request) {
   let orderId: string | null = null;
 
   try {
-    const session = await getCustomerSession(request);
-
-    const customer = session
-      ? await getPrisma().customer.findUnique({
-          where: { id: session.id },
-          select: {
-            id: true,
-            email: true,
-            isActive: true,
-          },
-        })
-      : null;
+    const customer = await getActiveCustomer(request);
+    if (!customer) {
+      return NextResponse.json({ error: 'Sign in to place an order.' }, { status: 401 });
+    }
 
     const result = await createCheckoutOrder(
       parsed.data,
       'razorpay',
       idempotencyKey,
-      customer?.isActive
-        ? { id: customer.id, email: customer.email }
-        : undefined
+      customer
     );
 
     orderId = result.order.id;

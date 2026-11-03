@@ -3,14 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/prisma', () => ({ getPrisma: vi.fn() }));
 vi.mock('@/lib/customer-session', () => ({ getCustomerSession: vi.fn() }));
 vi.mock('@/lib/order-access', () => ({
-  hasOrderAccessToken: vi.fn(),
-  requestOrderAccessToken: vi.fn(),
+  canAccessOrder: vi.fn(),
 }));
 vi.mock('@/lib/invoice-pdf', () => ({ generateInvoicePdf: vi.fn() }));
 
 import { getPrisma } from '@/lib/prisma';
 import { getCustomerSession } from '@/lib/customer-session';
-import { hasOrderAccessToken, requestOrderAccessToken } from '@/lib/order-access';
+import { canAccessOrder } from '@/lib/order-access';
 import { generateInvoicePdf } from '@/lib/invoice-pdf';
 import { GET } from './route';
 
@@ -56,8 +55,7 @@ describe('invoice download authorization', () => {
   it('does not generate or disclose an invoice to a different customer', async () => {
     mockOrder();
     vi.mocked(getCustomerSession).mockResolvedValue({ id: 'another-customer', email: 'other@example.com' });
-    vi.mocked(requestOrderAccessToken).mockReturnValue(null);
-    vi.mocked(hasOrderAccessToken).mockReturnValue(false);
+    vi.mocked(canAccessOrder).mockResolvedValue(false);
 
     const response = await GET(request(), { params: Promise.resolve({ orderNumber }) });
 
@@ -69,8 +67,7 @@ describe('invoice download authorization', () => {
   it('allows the customer who owns the order to download the invoice', async () => {
     mockOrder();
     vi.mocked(getCustomerSession).mockResolvedValue({ id: 'customer-1', email: 'owner@example.com' });
-    vi.mocked(requestOrderAccessToken).mockReturnValue(null);
-    vi.mocked(hasOrderAccessToken).mockReturnValue(false);
+    vi.mocked(canAccessOrder).mockResolvedValue(true);
     vi.mocked(generateInvoicePdf).mockResolvedValue(Buffer.from('%PDF-test'));
 
     const response = await GET(request(), { params: Promise.resolve({ orderNumber }) });
@@ -95,8 +92,7 @@ describe('invoice download authorization', () => {
   it('allows a guest order token and returns a private downloadable PDF', async () => {
     mockOrder(null);
     vi.mocked(getCustomerSession).mockResolvedValue(null);
-    vi.mocked(requestOrderAccessToken).mockReturnValue('guest-access-token');
-    vi.mocked(hasOrderAccessToken).mockReturnValue(true);
+    vi.mocked(canAccessOrder).mockResolvedValue(true);
     vi.mocked(generateInvoicePdf).mockResolvedValue(Buffer.from('%PDF-test'));
 
     const response = await GET(request(), { params: Promise.resolve({ orderNumber }) });
@@ -106,14 +102,17 @@ describe('invoice download authorization', () => {
     expect(response.headers.get('content-disposition')).toContain(`invoice-${orderNumber}.pdf`);
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(Buffer.from(await response.arrayBuffer()).toString()).toBe('%PDF-test');
-    expect(hasOrderAccessToken).toHaveBeenCalledWith('guest-access-token', 'stored-hash');
+    expect(canAccessOrder).toHaveBeenCalledWith(
+      expect.any(Request),
+      orderNumber,
+      expect.objectContaining({ customerId: null, guestAccessTokenHash: 'stored-hash' })
+    );
   });
 
   it('returns a generic error with safe correlated diagnostics when PDF generation fails', async () => {
     mockOrder();
     vi.mocked(getCustomerSession).mockResolvedValue({ id: 'customer-1', email: 'owner@example.com' });
-    vi.mocked(requestOrderAccessToken).mockReturnValue(null);
-    vi.mocked(hasOrderAccessToken).mockReturnValue(false);
+    vi.mocked(canAccessOrder).mockResolvedValue(true);
     vi.mocked(generateInvoicePdf).mockRejectedValue(Object.assign(
       new Error('private diagnostic detail'),
       { code: 'ENOENT' }

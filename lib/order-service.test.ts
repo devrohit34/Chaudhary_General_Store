@@ -20,6 +20,7 @@ const checkoutInput = {
   isExpress: false,
   items: [{ product_id: 'product-1', quantity: 2 }],
 };
+const testCustomer = { id: 'customer-1', email: 'customer@example.com' };
 
 type TestProduct = {
   id: string;
@@ -166,7 +167,7 @@ describe('checkout order creation', () => {
     vi.stubEnv('ORDER_ACCESS_SECRET', 'test-order-access-secret-with-32-chars');
     const { transaction } = setupPrisma();
 
-    await createCheckoutOrder(checkoutInput, 'razorpay', 'online-payment-key');
+    await createCheckoutOrder(checkoutInput, 'razorpay', 'online-payment-key', testCustomer);
 
     expect(transaction.order.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
@@ -191,7 +192,8 @@ describe('checkout order creation', () => {
     await createCheckoutOrder(
       { ...checkoutInput, isExpress: true },
       'cod',
-      'express-delivery-key'
+      'express-delivery-key',
+      testCustomer
     );
 
     expect(transaction.order.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -221,7 +223,7 @@ describe('checkout order creation', () => {
       items: products.map((product) => ({ product_id: product.id, quantity: 1 })),
     };
 
-    await createCheckoutOrder(input, 'cod', 'many-products-key');
+    await createCheckoutOrder(input, 'cod', 'many-products-key', testCustomer);
 
     expect(transaction.$queryRaw).toHaveBeenCalledOnce();
     expect(transaction.order.create).toHaveBeenCalledOnce();
@@ -235,7 +237,7 @@ describe('checkout order creation', () => {
     await expect(createCheckoutOrder({
       ...checkoutInput,
       items: [{ product_id: 'product-1', quantity: 0 }],
-    }, 'cod', 'invalid-quantity-key')).rejects.toBeInstanceOf(CheckoutError);
+    }, 'cod', 'invalid-quantity-key', testCustomer)).rejects.toBeInstanceOf(CheckoutError);
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -255,7 +257,7 @@ describe('checkout order creation', () => {
       }],
     });
 
-    await expect(createCheckoutOrder(checkoutInput, 'cod', 'checkout-key')).rejects.toBeInstanceOf(CheckoutError);
+    await expect(createCheckoutOrder(checkoutInput, 'cod', 'checkout-key', testCustomer)).rejects.toBeInstanceOf(CheckoutError);
 
     expect(transaction.order.create).not.toHaveBeenCalled();
     expect(inventory.get('product-1')?.stockQuantity).toBe(1);
@@ -266,7 +268,7 @@ describe('checkout order creation', () => {
     const databaseError = new Error('database write failed');
     const { transaction, inventory } = setupPrisma({ orderCreateError: databaseError });
 
-    await expect(createCheckoutOrder(checkoutInput, 'cod', 'checkout-key')).rejects.toBe(databaseError);
+    await expect(createCheckoutOrder(checkoutInput, 'cod', 'checkout-key', testCustomer)).rejects.toBe(databaseError);
 
     expect(transaction.$queryRaw).toHaveBeenCalledOnce();
     expect(transaction.order.create).toHaveBeenCalledOnce();
@@ -294,8 +296,8 @@ describe('checkout order creation', () => {
     };
 
     const results = await Promise.allSettled([
-      createCheckoutOrder(competingCheckout, 'cod', 'customer-one-key'),
-      createCheckoutOrder(competingCheckout, 'cod', 'customer-two-key'),
+      createCheckoutOrder(competingCheckout, 'cod', 'customer-one-key', { id: 'customer-1', email: 'one@example.com' }),
+      createCheckoutOrder(competingCheckout, 'cod', 'customer-two-key', { id: 'customer-2', email: 'two@example.com' }),
     ]);
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
@@ -307,11 +309,23 @@ describe('checkout order creation', () => {
     vi.stubEnv('ORDER_ACCESS_SECRET', 'test-order-access-secret-with-32-chars');
     const { transaction, inventory } = setupPrisma();
 
-    await createCheckoutOrder(checkoutInput, 'cod', 'repeat-checkout-key');
-    const retry = await createCheckoutOrder(checkoutInput, 'cod', 'repeat-checkout-key');
+    await createCheckoutOrder(checkoutInput, 'cod', 'repeat-checkout-key', testCustomer);
+    const retry = await createCheckoutOrder(checkoutInput, 'cod', 'repeat-checkout-key', testCustomer);
 
     expect(retry.alreadyExists).toBe(true);
     expect(transaction.$queryRaw).toHaveBeenCalledOnce();
     expect(inventory.get('product-1')?.stockQuantity).toBe(3);
+  });
+
+  it('does not allow another customer to reuse an existing checkout key', async () => {
+    vi.stubEnv('ORDER_ACCESS_SECRET', 'test-order-access-secret-with-32-chars');
+    setupPrisma();
+
+    await createCheckoutOrder(checkoutInput, 'cod', 'shared-checkout-key', testCustomer);
+
+    await expect(createCheckoutOrder(checkoutInput, 'cod', 'shared-checkout-key', {
+      id: 'customer-2',
+      email: 'other@example.com',
+    })).rejects.toMatchObject({ status: 409 });
   });
 });

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getPrisma } from '@/lib/prisma';
 import { getCustomerSession } from '@/lib/customer-session';
-import { hasOrderAccessToken, requestOrderAccessToken } from '@/lib/order-access';
+import { canAccessOrder } from '@/lib/order-access';
 import { hasSameOrigin } from '@/lib/request-security';
 import { toOrderDto } from '@/lib/prisma-dto';
 import { CANCELLATION_REASONS } from '@/lib/order-cancellation-policy';
@@ -38,11 +38,7 @@ export async function POST(
       select: { id: true, customerId: true, guestAccessTokenHash: true },
     });
     const session = await getCustomerSession(request);
-    const guestAccessAllowed = hasOrderAccessToken(
-      requestOrderAccessToken(request, orderNumber),
-      accessOrder?.guestAccessTokenHash ?? null
-    );
-    if (!accessOrder || (!guestAccessAllowed && session?.id !== accessOrder.customerId)) {
+    if (!accessOrder || !await canAccessOrder(request, orderNumber, accessOrder)) {
       return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
     }
 
