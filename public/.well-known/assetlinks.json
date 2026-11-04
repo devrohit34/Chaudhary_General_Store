@@ -1,0 +1,15 @@
+
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.chaudharygeneralstore.app",
+      "sha256_cert_fingerprints": [
+        "26:C8:10:18:A6:39:4E:4D:84:D6:3B:99:25:0B:68:84:BA:00:98:6F:E7:68:87:75:95:A3:1C:8D:37:15:65:9C"
+      ]
+    }
+  }
+]
