@@ -13,6 +13,10 @@ export const metadata: Metadata = {
   title: 'Chaudhary General Store | चौधरी जेनरल स्टोर',
   description: 'Your trusted neighborhood kirana store in Bhagwanpur, Bihar. Fresh groceries and daily essentials. Owner: Kundan Kumar Chaudhary.',
   keywords: 'kirana store, grocery, online grocery, Bihar, Bhagwanpur, delivery, fresh, dairy, snacks, Chaudhary General Store',
+  themeColor: '#159B4A',
+  icons: {
+    icon: '/icons/app-icon.png',
+  },
   openGraph: {
     title: 'Chaudhary General Store | चौधरी जेनरल स्टोर',
     description: 'Fresh groceries and daily essentials. Owner: Kundan Kumar Chaudhary, Bhagwanpur, Bihar.',
