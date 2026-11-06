@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { Category } from '@/lib/store-types';
@@ -48,8 +49,19 @@ export default function CategoriesPage() {
           {categories.map((cat) => (
             <Link key={cat.id} href={`/categories/${cat.slug}`}>
               <div className="group rounded-xl border bg-card overflow-hidden hover:shadow-lg hover:border-primary/30 transition-all">
-                <div className="aspect-video bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center text-6xl">
-                  {cat.icon || '🛒'}
+                <div className="relative aspect-video bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center text-6xl">
+                  {cat.image_url ? (
+                    <Image
+                      src={cat.image_url}
+                      alt={cat.name}
+                      fill
+                      unoptimized
+                      sizes="(max-width: 640px) 50vw, 25vw"
+                      className="object-cover"
+                    />
+                  ) : (
+                    cat.icon || '🛒'
+                  )}
                 </div>
                 <div className="p-4">
                   <h3 className="font-semibold mb-1">{cat.name}</h3>

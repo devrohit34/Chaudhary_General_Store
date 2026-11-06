@@ -125,8 +125,19 @@ export default function HomePage() {
             {categories.map((cat) => (
               <Link key={cat.id} href={`/categories/${cat.slug}`}>
                 <div className="group text-center">
-                  <div className="aspect-square rounded-xl bg-gradient-to-br from-primary/10 to-accent/10 border flex items-center justify-center text-4xl mb-2 group-hover:scale-105 group-hover:border-primary/30 transition-all">
-                    {cat.icon || '🛒'}
+                  <div className="relative aspect-square rounded-xl bg-gradient-to-br from-primary/10 to-accent/10 border flex items-center justify-center text-4xl mb-2 group-hover:scale-105 group-hover:border-primary/30 transition-all overflow-hidden">
+                    {cat.image_url ? (
+                      <Image
+                        src={cat.image_url}
+                        alt={cat.name}
+                        fill
+                        unoptimized
+                        sizes="(max-width: 640px) 33vw, 12vw"
+                        className="object-cover"
+                      />
+                    ) : (
+                      cat.icon || '🛒'
+                    )}
                   </div>
                   <div className="text-xs font-medium line-clamp-2">{cat.name}</div>
                 </div>
