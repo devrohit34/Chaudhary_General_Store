@@ -176,9 +176,11 @@ export default function AccountPage() {
                   </div>
                 </div>
                 <Button onClick={signIn} className="w-full">Sign In</Button>
-                <p className="text-xs text-center text-muted-foreground">
-                  Admin: kkc8014@gmail.com
-                </p>
+                <div className="text-right">
+                  <Link href="/account/forgot-password" className="text-xs font-medium text-[#159B4A] hover:underline">
+                    Forgot Password?
+                  </Link>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

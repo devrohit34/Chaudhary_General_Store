@@ -9,8 +9,12 @@ function signingKey() {
   return new TextEncoder().encode(secret);
 }
 
-export async function createCustomerSession(customer: { id: string; email: string }) {
-  return new SignJWT({ email: customer.email, role: 'customer' })
+export async function createCustomerSession(customer: { id: string; email: string; sessionVersion?: number }) {
+  return new SignJWT({
+    email: customer.email,
+    role: 'customer',
+    sessionVersion: customer.sessionVersion ?? 1,
+  })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuer(ISSUER)
     .setSubject(customer.id)
@@ -19,7 +23,7 @@ export async function createCustomerSession(customer: { id: string; email: strin
     .sign(signingKey());
 }
 
-export async function getCustomerSession(request: Request) {
+export async function getCustomerSession(request: Request): Promise<{ id: string; email: string; sessionVersion?: number } | null> {
   const token = request.headers.get('cookie')?.split(';')
     .map((part) => part.trim())
     .find((part) => part.startsWith(`${COOKIE_NAME}=`))
@@ -31,7 +35,7 @@ export async function getCustomerSession(request: Request) {
       issuer: ISSUER,
     });
     if (typeof payload.sub !== 'string' || typeof payload.email !== 'string') return null;
-    return { id: payload.sub, email: payload.email };
+    return { id: payload.sub, email: payload.email, sessionVersion: typeof payload.sessionVersion === 'number' ? payload.sessionVersion : 1 };
   } catch {
     return null;
   }

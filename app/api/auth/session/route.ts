@@ -9,9 +9,12 @@ export async function GET(request: Request) {
     if (!session) return NextResponse.json({ user: null });
     const customer = await getPrisma().customer.findUnique({
       where: { id: session.id },
-      select: { id: true, email: true, fullName: true, isActive: true },
+      select: { id: true, email: true, fullName: true, isActive: true, sessionVersion: true },
     });
     if (!customer?.isActive) return NextResponse.json({ user: null }, { headers: { 'Set-Cookie': clearCustomerSessionCookie() } });
+    if (typeof session.sessionVersion === 'number' && customer.sessionVersion !== session.sessionVersion) {
+      return NextResponse.json({ user: null }, { headers: { 'Set-Cookie': clearCustomerSessionCookie() } });
+    }
     return NextResponse.json({ user: { id: customer.id, email: customer.email, full_name: customer.fullName } });
   } catch (error) {
     console.error('Customer session lookup failed:', error instanceof Error ? error.message : 'Unknown error');

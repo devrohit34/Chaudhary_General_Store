@@ -18,6 +18,7 @@ export async function POST(request: Request) {
   try {
     const customer = await getPrisma().customer.findUnique({
       where: { email: parsed.data.email.toLowerCase() },
+      select: { id: true, email: true, fullName: true, passwordHash: true, isActive: true, sessionVersion: true },
     });
     if (!customer || !customer.isActive || !(await bcrypt.compare(parsed.data.password, customer.passwordHash))) {
       return NextResponse.json({ error: 'Invalid email or password.' }, { status: 401 });

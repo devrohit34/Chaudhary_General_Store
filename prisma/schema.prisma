@@ -118,6 +118,7 @@ model Customer {
   passwordHash   String            @map("password_hash")
   fullName       String            @map("full_name")
   phone          String?
+  sessionVersion Int               @default(1) @map("session_version")
   isActive       Boolean           @default(true) @map("is_active")
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @updatedAt @map("updated_at")
@@ -125,8 +126,23 @@ model Customer {
   orders         Order[]
   reviews        Review[]
   wishlistItems  WishlistItem[]
+  resetTokens    PasswordResetToken[]
 
   @@map("customers")
+}
+
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  customerId String    @map("customer_id")
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  usedAt     DateTime? @map("used_at")
+
+  @@index([customerId, expiresAt])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 model Address {

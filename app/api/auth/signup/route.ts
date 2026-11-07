@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const passwordHash = await bcrypt.hash(parsed.data.password, 12);
     const customer = await getPrisma().customer.create({
       data: { email, passwordHash, fullName: parsed.data.fullName, phone: parsed.data.phone || null },
-      select: { id: true, email: true, fullName: true },
+      select: { id: true, email: true, fullName: true, sessionVersion: true },
     });
     const token = await createCustomerSession(customer);
     return NextResponse.json(
